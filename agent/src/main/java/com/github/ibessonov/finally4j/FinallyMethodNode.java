@@ -16,13 +16,44 @@
 package com.github.ibessonov.finally4j;
 
 import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.tree.*;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
-import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 
-import static com.github.ibessonov.finally4j.Util.*;
-import static org.objectweb.asm.Opcodes.*;
+import static com.github.ibessonov.finally4j.Util.ASM_V;
+import static com.github.ibessonov.finally4j.Util.findNextInstruction;
+import static com.github.ibessonov.finally4j.Util.findNextLabel;
+import static com.github.ibessonov.finally4j.Util.findPreviousInstruction;
+import static com.github.ibessonov.finally4j.Util.getValueOfMethodDescriptor;
+import static com.github.ibessonov.finally4j.Util.isLoadInstruction;
+import static com.github.ibessonov.finally4j.Util.isStoreInstruction;
+import static com.github.ibessonov.finally4j.Util.loadOpcode;
+import static com.github.ibessonov.finally4j.Util.toBoxedInternalName;
+import static com.github.ibessonov.finally4j.Util.toPrimitiveName;
+import static org.objectweb.asm.Opcodes.ATHROW;
+import static org.objectweb.asm.Opcodes.CHECKCAST;
+import static org.objectweb.asm.Opcodes.DUP;
+import static org.objectweb.asm.Opcodes.ICONST_0;
+import static org.objectweb.asm.Opcodes.ICONST_1;
+import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
+import static org.objectweb.asm.Opcodes.INVOKESTATIC;
+import static org.objectweb.asm.Opcodes.INVOKEVIRTUAL;
+import static org.objectweb.asm.Opcodes.NEW;
 import static org.objectweb.asm.tree.AbstractInsnNode.METHOD_INSN;
 
 /**
@@ -30,7 +61,7 @@ import static org.objectweb.asm.tree.AbstractInsnNode.METHOD_INSN;
  */
 class FinallyMethodNode extends MethodNode {
 
-    private final AtomicBoolean methodChanged;
+    private final Runnable methodChanged;
     private final MethodVisitor outerMv;
 
     private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
@@ -38,9 +69,9 @@ class FinallyMethodNode extends MethodNode {
     private VarInsnNode[] storeInstructions;
     private ReturnOrThrow[] returnOrThrows;
 
-    FinallyMethodNode(AtomicBoolean methodChanged, MethodVisitor outerMv,
+    FinallyMethodNode(Runnable methodChanged, MethodVisitor outerMv,
                       int access, String name, String desc, String signature, String[] exceptions) {
-        super(ASM5, access, name, desc, signature, exceptions);
+        super(ASM_V, access, name, desc, signature, exceptions);
         this.methodChanged = methodChanged;
         this.outerMv       = outerMv;
     }
@@ -66,6 +97,8 @@ class FinallyMethodNode extends MethodNode {
                 rotStack.remove(0);
             }
             if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
+                assert node instanceof MethodInsnNode;
+
                 MethodInsnNode methodInstruction = (MethodInsnNode) node;
                 if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
                     switch (methodInstruction.name) {
@@ -161,8 +194,8 @@ class FinallyMethodNode extends MethodNode {
     //todo not finished
     @SuppressWarnings("unchecked")
     private void initStoreInstructions() {
-        boolean catches[] = new boolean[labels.length];
-        for (TryCatchBlockNode block : (List<TryCatchBlockNode>) super.tryCatchBlocks) {
+        boolean[] catches = new boolean[labels.length];
+        for (TryCatchBlockNode block : super.tryCatchBlocks) {
             if (block.start == block.handler) {
                 continue; // nasty bug in compiler :D
             }
@@ -176,10 +209,10 @@ class FinallyMethodNode extends MethodNode {
 
         Map<Integer, IntBorelSet> tcfbs = new HashMap<>();
 
-        boolean finallies[] = new boolean[labels.length];
-        List<Block> catchFinallyBlocks[] = new List[labels.length];
-        List<Block> tryFinallyBlocks[] = new List[labels.length];
-        for (TryCatchBlockNode block : (List<TryCatchBlockNode>) super.tryCatchBlocks) {
+        boolean[] finallies = new boolean[labels.length];
+        List<Block>[] catchFinallyBlocks = new List[labels.length];
+        List<Block>[] tryFinallyBlocks = new List[labels.length];
+        for (TryCatchBlockNode block : super.tryCatchBlocks) {
             if (block.start == block.handler) {
                 continue; // nasty bug in compiler :D
             }
@@ -246,7 +279,7 @@ class FinallyMethodNode extends MethodNode {
             System.out.println(entry.getValue());
             System.out.println("Default finally block at " + entry.getKey());
 //            System.out.println(isStoreInstruction(findNextInstruction(getLabel(entry.getKey()))));
-            for (TryCatchBlockNode block : (List<TryCatchBlockNode>) super.tryCatchBlocks) {
+            for (TryCatchBlockNode block : super.tryCatchBlocks) {
                 if (block.start == block.handler) {
                     continue; // indicates place where exception is stored
                 }
@@ -334,7 +367,9 @@ class FinallyMethodNode extends MethodNode {
     private AbstractInsnNode replaceInstruction(AbstractInsnNode from, AbstractInsnNode to) {
         super.instructions.insertBefore(from, to);
         super.instructions.remove(from);
-        methodChanged.set(true);
+
+        methodChanged.run();
+
         return to;
     }
 

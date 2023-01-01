@@ -16,7 +16,6 @@
 package com.github.ibessonov.finally4j;
 
 interface Constants {
-
     String FINALLY_CLASS_INTERNAL_NAME = "com/github/ibessonov/finally4j/Finally";
 
     String FINALLY_IS_SUPPORTED_METHOD_NAME = "isSupported";

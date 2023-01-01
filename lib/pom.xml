@@ -29,11 +29,12 @@
             <groupId>${project.groupId}</groupId>
             <artifactId>finally4j-agent</artifactId>
             <version>${revision}</version>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
-            <version>5.0.0</version>
+            <version>5.9.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -53,11 +54,11 @@
                     <dependency>
                         <groupId>org.junit.jupiter</groupId>
                         <artifactId>junit-jupiter-engine</artifactId>
-                        <version>5.0.0</version>
+                        <version>5.9.0</version>
                     </dependency>
                 </dependencies>
                 <configuration>
-                    <argLine>-javaagent:src/test/resources/finally4j-agent.jar</argLine>
+                    <argLine>-javaagent:../agent/target/finally4j-agent-${revision}.jar</argLine>
                 </configuration>
             </plugin>
             <plugin>

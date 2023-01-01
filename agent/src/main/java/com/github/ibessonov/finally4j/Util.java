@@ -18,13 +18,21 @@ package com.github.ibessonov.finally4j;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 
-import static org.objectweb.asm.Opcodes.*;
+import static org.objectweb.asm.Opcodes.ALOAD;
+import static org.objectweb.asm.Opcodes.ASM7;
+import static org.objectweb.asm.Opcodes.ASTORE;
+import static org.objectweb.asm.Opcodes.DLOAD;
+import static org.objectweb.asm.Opcodes.FLOAD;
+import static org.objectweb.asm.Opcodes.ILOAD;
+import static org.objectweb.asm.Opcodes.ISTORE;
+import static org.objectweb.asm.Opcodes.LLOAD;
 import static org.objectweb.asm.tree.AbstractInsnNode.LABEL;
 
 /**
  * @author ibessonov
  */
 class Util {
+    static int ASM_V = ASM7;
 
     static AbstractInsnNode findNextInstruction(AbstractInsnNode node) {
         do {

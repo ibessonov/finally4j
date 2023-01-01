@@ -16,10 +16,10 @@
 package com.github.ibessonov.finally4j.ex;
 
 import com.github.ibessonov.finally4j.Finally;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author ibessonov
@@ -32,7 +32,7 @@ class SuccessfulTest {
             try {
                 throw new Exception();
             } finally {
-                Assertions.assertTrue(Finally.hasThrownException());
+                assertTrue(Finally.hasThrownException());
             }
         } catch (Exception ignored) {
         }

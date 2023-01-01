@@ -22,11 +22,12 @@ import org.objectweb.asm.MethodVisitor;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
-import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.github.ibessonov.finally4j.Util.ASM_V;
 import static org.objectweb.asm.ClassWriter.COMPUTE_FRAMES;
 import static org.objectweb.asm.ClassWriter.COMPUTE_MAXS;
-import static org.objectweb.asm.Opcodes.*;
+import static org.objectweb.asm.Opcodes.ICONST_0;
+import static org.objectweb.asm.Opcodes.ICONST_1;
 
 /**
  * @author ibessonov
@@ -36,65 +37,35 @@ class FinallyClassFileTransformer implements ClassFileTransformer {
     @Override
     public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                             ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-
-        // lambdas and other classes defined with "Unsafe#defineAnonymousClass"
+        // Lambdas and other classes defined with "Unsafe#defineAnonymousClass".
         if (className == null) return null;
 
-        // "Finally" class requires special treatment
+        // "Finally" class requires special treatment, because Finally#isSupported should return true when transformed.
         if (className.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
             return transformFinallyClass(classfileBuffer);
         }
 
-        boolean[] returnNull = { true };
-        ClassReader cr = new ClassReader(classfileBuffer) {
+        var cr = new ClassReader0(classfileBuffer);
+        var cw = new ClassWriter(cr, COMPUTE_MAXS | COMPUTE_FRAMES);
 
-            //TODO not sure if this will work in ASM 6, requires testing
-            @Override
-            public String readUTF8(int index, char[] buf) {
-                String utf8str = super.readUTF8(index, buf);
-                if (utf8str != null && returnNull[0]) {
-                    returnNull[0] = !utf8str.equals(Constants.FINALLY_CLASS_INTERNAL_NAME);
-                }
-                return utf8str;
-            }
-        };
-        ClassWriter cw = new ClassWriter(cr, COMPUTE_MAXS | COMPUTE_FRAMES);
+        if (!cr.hasFinallyReferenced) return null;
 
-        // do nothing if there are no references of "Finally" class
-        if (returnNull[0]) return null;
+        var cv = new ClassVisitor0(cw);
+        cr.accept(cv, 0);
 
-        AtomicBoolean classWasTransformed = new AtomicBoolean(false);
-        ClassVisitor cv = new ClassVisitor(ASM5, cw) {
-
-            @Override
-            public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-                MethodVisitor outerMv = super.visitMethod(access, name, desc, signature, exceptions);
-                return new FinallyMethodNode(classWasTransformed, outerMv, access, name, desc, signature, exceptions);
-            }
-        };
-
-        try {
-            System.out.println("----------------------------------------");
-            System.out.println(className);
-            System.out.println("----------------------------------------");
-            cr.accept(cv, 0);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return classWasTransformed.get() ? cw.toByteArray() : null;
+        return cv.classWasTransformed ? cw.toByteArray() : null;
     }
 
     private static byte[] transformFinallyClass(byte[] classfileBuffer) {
-        ClassReader cr = new ClassReader(classfileBuffer);
-        ClassWriter cw = new ClassWriter(cr, COMPUTE_MAXS | COMPUTE_FRAMES);
-
-        ClassVisitor cv = new ClassVisitor(ASM5, cw) {
-
+        var cr = new ClassReader(classfileBuffer);
+        var cw = new ClassWriter(cr, COMPUTE_MAXS | COMPUTE_FRAMES);
+        var cv = new ClassVisitor(ASM_V, cw) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
                 MethodVisitor outerMv = super.visitMethod(access, name, desc, signature, exceptions);
+
                 if (name.equals(Constants.FINALLY_IS_SUPPORTED_METHOD_NAME)) {
-                    return new MethodVisitor(ASM5, outerMv) {
+                    return new MethodVisitor(ASM_V, outerMv) {
 
                         @Override
                         public void visitInsn(int opcode) {
@@ -110,5 +81,49 @@ class FinallyClassFileTransformer implements ClassFileTransformer {
 
         cr.accept(cv, 0);
         return cw.toByteArray();
+    }
+
+    /**
+     * Class reader implementation that scans the symbol table for the presence of "Finally" class. Classes that don't
+     * have it present should not be transformed.
+     */
+    private static class ClassReader0 extends ClassReader {
+        boolean hasFinallyReferenced;
+
+        public ClassReader0(byte[] classFile) {
+            super(classFile);
+        }
+
+        @Override
+        public String readUTF8(int index, char[] buf) {
+            String utf8str = super.readUTF8(index, buf);
+            if (!hasFinallyReferenced && utf8str != null) {
+                hasFinallyReferenced = utf8str.equals(Constants.FINALLY_CLASS_INTERNAL_NAME);
+            }
+            return utf8str;
+        }
+    }
+
+    /**
+     * Class visitor implementation that transforms all methods that call methods of "Finally" class.
+     */
+    private static class ClassVisitor0 extends ClassVisitor {
+        boolean classWasTransformed;
+
+        private final Runnable callback;
+
+        public ClassVisitor0(ClassWriter cw) {
+            super(Util.ASM_V, cw);
+
+            // Make this a field for mostly aesthetic purposes.
+            callback = () -> classWasTransformed = true;
+        }
+
+        @Override
+        public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
+            MethodVisitor outerMv = super.visitMethod(access, name, desc, signature, exceptions);
+
+            return new FinallyMethodNode(callback, outerMv, access, name, desc, signature, exceptions);
+        }
     }
 }
