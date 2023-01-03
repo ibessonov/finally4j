@@ -18,6 +18,7 @@ package com.github.ibessonov.finally4j;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
@@ -28,26 +29,35 @@ import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.LinkedList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableSet;
-import java.util.TreeSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.github.ibessonov.finally4j.Util.ASM_V;
 import static com.github.ibessonov.finally4j.Util.findNextInstruction;
 import static com.github.ibessonov.finally4j.Util.findNextLabel;
 import static com.github.ibessonov.finally4j.Util.findPreviousInstruction;
-import static com.github.ibessonov.finally4j.Util.getValueOfMethodDescriptor;
-import static com.github.ibessonov.finally4j.Util.isLoadInstruction;
-import static com.github.ibessonov.finally4j.Util.isStoreInstruction;
+import static com.github.ibessonov.finally4j.Util.findPreviousLabel;
+import static com.github.ibessonov.finally4j.Util.getMethodDescriptorForValueOf;
+import static com.github.ibessonov.finally4j.Util.isLoad;
+import static com.github.ibessonov.finally4j.Util.isReturn;
+import static com.github.ibessonov.finally4j.Util.isStore;
+import static com.github.ibessonov.finally4j.Util.isThrow;
 import static com.github.ibessonov.finally4j.Util.loadOpcode;
 import static com.github.ibessonov.finally4j.Util.toBoxedInternalName;
 import static com.github.ibessonov.finally4j.Util.toPrimitiveName;
+import static java.util.Comparator.comparingInt;
+import static java.util.function.Predicate.not;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Stream.concat;
 import static org.objectweb.asm.Opcodes.ATHROW;
 import static org.objectweb.asm.Opcodes.CHECKCAST;
 import static org.objectweb.asm.Opcodes.DUP;
+import static org.objectweb.asm.Opcodes.GOTO;
 import static org.objectweb.asm.Opcodes.ICONST_0;
 import static org.objectweb.asm.Opcodes.ICONST_1;
 import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
@@ -78,44 +88,68 @@ class FinallyMethodNode extends MethodNode {
 
     @Override
     public void visitEnd() {
+        System.out.println("========================================");
+        System.out.println(super.name);
+
         initLabelsCache();
-        initStoreInstructions();
 
-        List<VarInsnNode> storeStack = new LinkedList<>();
-        List<ReturnOrThrow> rotStack = new LinkedList<>();
-        int currentLabelIndex = -1;
-        for (AbstractInsnNode node = super.instructions.getFirst(); node != null; node = node.getNext()) {
-            if (node.getType() == AbstractInsnNode.LABEL) {
-                currentLabelIndex++;
-            }
-            if (currentLabelIndex >= 0 && storeInstructions[currentLabelIndex] != null) {
-                storeStack.add(0, storeInstructions[currentLabelIndex]);
-                rotStack.add(0, returnOrThrows[currentLabelIndex]);
-            }
-            if (!storeStack.isEmpty() && isLoadInstruction(node) && ((VarInsnNode) node).var == storeStack.get(0).var) {
-                storeStack.remove(0);
-                rotStack.remove(0);
-            }
-            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
-                assert node instanceof MethodInsnNode;
+        List<Try> tryList;
 
-                MethodInsnNode methodInstruction = (MethodInsnNode) node;
-                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
-                    switch (methodInstruction.name) {
-                        case Constants.FINALLY_HAS_RETURN_VALUE_METHOD_NAME: {
-                            int c = !rotStack.isEmpty() && rotStack.get(0) == ReturnOrThrow.RETURN ? ICONST_1 : ICONST_0;
-                            node = replaceInstruction(methodInstruction, new InsnNode(c));
-                            break;
-                        }
-                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME: {
-                            int c = !rotStack.isEmpty() && rotStack.get(0) == ReturnOrThrow.THROW ? ICONST_1 : ICONST_0;
-                            node = replaceInstruction(methodInstruction, new InsnNode(c));
-                            break;
-                        }
+        try {
+            tryList = printInferredStructure();
+        } catch (Throwable e) {
+            e.printStackTrace();
+
+            throw e;
+        }
+
+        for (Try aTry : tryList) {
+            Scope tryScope = aTry.tryScope;
+
+            for (int i = 0; i < tryScope.blocks.size(); i++) {
+                Block finallyBlock; {
+                    Block tryBlock = tryScope.blocks.get(i);
+
+                    Block nextBlock;
+
+                    if (tryBlock == tryScope.last()) {
+                        nextBlock = aTry.catchScopes.isEmpty() ? aTry.finallyScope.first() : aTry.catchScopes.get(0).first();
+                    } else {
+                        nextBlock = tryScope.blocks.get(i + 1);
                     }
-                    if (!storeStack.isEmpty()) {
-                        if (rotStack.get(0) == ReturnOrThrow.RETURN) {
-                            node = processFinallyMethodWithReturn(node, methodInstruction, storeStack.get(0).var);
+
+                    finallyBlock = new Block(tryBlock.end, nextBlock.start);
+                }
+
+                if (finallyBlock.startIndex() >= finallyBlock.endIndex()) {
+                    continue;
+                }
+
+                //TODO This code is bad. It doesn't cover nested stuff at all.
+                System.out.println("Finally block in try = " + finallyBlock);
+                AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
+                if (isStore(previousInstruction)) {
+                    VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
+
+                    for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
+                        if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
+                            assert node instanceof MethodInsnNode;
+
+                            MethodInsnNode methodInstruction = (MethodInsnNode) node;
+                            if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
+                                switch (methodInstruction.name) {
+                                    case Constants.FINALLY_HAS_RETURN_VALUE_METHOD_NAME: {
+                                        node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
+                                        break;
+                                    }
+                                    case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME: {
+                                        node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
+                                        break;
+                                    }
+                                    default:
+                                        node = processFinallyMethodWithReturn(node, methodInstruction, storeInstruction.var);
+                                }
+                            }
                         }
                     }
                 }
@@ -123,6 +157,282 @@ class FinallyMethodNode extends MethodNode {
         }
 
         super.accept(outerMv);
+    }
+
+    static class Try {
+        final Scope tryScope = new Scope();
+
+        final List<Scope> catchScopes = new ArrayList<>();
+
+        final Scope finallyScope = new Scope();
+
+        void print(String padding) {
+            String nestedPadding = padding + "  ";
+
+            System.out.println(padding + "try " + tryScope.blocks + " {");
+            for (Try nestedTry : tryScope.nested) {
+                nestedTry.print(nestedPadding);
+            }
+
+            for (Scope catchScope : catchScopes) {
+                System.out.println(padding + "} catch " + catchScope.blocks + " {");
+                for (Try nestedTry : catchScope.nested) {
+                    nestedTry.print(nestedPadding);
+                }
+            }
+
+            System.out.println(padding + "} finally " + finallyScope.blocks.get(0) + " {");
+            for (Try nestedTry : finallyScope.nested) {
+                nestedTry.print(nestedPadding);
+            }
+
+            System.out.println(padding + "}");
+        }
+    }
+
+    static class Scope {
+        final List<Block> blocks = new ArrayList<>();
+
+        final List<Try> nested = new ArrayList<>();
+
+        boolean surrounds(Try aTry) {
+            Block first = first();
+            Block last = last();
+
+            Block tryFirst = aTry.tryScope.first();
+            Block tryLast = aTry.finallyScope.last();
+
+            return first.startIndex() <= tryFirst.startIndex() && tryLast.endIndex() <= last.endIndex();
+        }
+
+        private Block first() {
+            return blocks.get(0);
+        }
+
+        private Block last() {
+            return blocks.get(blocks.size() - 1);
+        }
+    }
+
+    private List<Try> printInferredStructure() {
+//        for (TryCatchBlockNode block : super.tryCatchBlocks) {
+//            System.out.println("try-catch-block: " + getLabelIndex(block.start) + " " + getLabelIndex(block.end) + " " + getLabelIndex(block.handler) + " (" + block.type + ")");
+//
+//            if (skipBlock(block)/* || getLabelIndex(block.end) > getLabelIndex(block.handler)*/) {
+//                AbstractInsnNode instruction = findPreviousInstruction(findNextLabel(block.end));
+//
+//                System.out.println("Handler opcode = " + instruction.getOpcode());
+//            }
+//        }
+
+        var blocksGroupedByHandler = tryCatchBlocks.stream()
+                .filter(not(FinallyMethodNode::skipBlock))
+                .filter(not(Util::defaultFinallyBlock))
+                .collect(Collectors.groupingBy(block -> block.handler));
+
+        var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
+                .filter(not(FinallyMethodNode::skipBlock))
+                .filter(Util::defaultFinallyBlock)
+                .collect(Collectors.groupingBy(block -> block.handler));
+
+        concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
+                .forEach(list -> list.sort(comparingInt(node -> getLabelIndex(node.start))));
+
+        class CatchBlockX {
+            final String type;
+            final LabelNode start;
+
+            CatchBlockX(String type, LabelNode start) {
+                this.type = type;
+                this.start = start;
+            }
+        }
+
+        Map<List<Block>, List<CatchBlockX>> catchBlocksMap = new HashMap<>();
+        for (Map.Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByHandler.entrySet()) {
+            List<TryCatchBlockNode> list = entry.getValue();
+
+            List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
+
+            catchBlocksMap.computeIfAbsent(blocks, b -> new ArrayList<>())
+                    .add(new CatchBlockX(list.get(0).type, entry.getKey()));
+        }
+
+        List<Try> tempTryList = new ArrayList<>();
+
+        for (Map.Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByDefaultHandler.entrySet()) {
+            List<TryCatchBlockNode> list = entry.getValue();
+
+            List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
+
+            LabelNode nextLabel = findTheEndOfFinally(entry.getKey());
+
+            boolean found = false;
+//
+//            CatchBlockX finallyCatchBlockX = new CatchBlockX(null, entry.getKey());
+
+            for (Map.Entry<List<Block>, List<CatchBlockX>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
+                List<Block> prefix = catchBlocksMapEntry.getKey();
+
+                if (startsWith(blocks, prefix)) {
+                    List<CatchBlockX> value = catchBlocksMapEntry.getValue();
+                    value.sort(comparingInt(cb -> getLabelIndex(cb.start)));
+
+                    Try newTry = new Try();
+
+                    newTry.tryScope.blocks.addAll(blocks.subList(0, prefix.size()));
+
+                    List<Block> allCatchSegments = blocks.subList(prefix.size(), blocks.size());
+
+                    assert value.get(0).start == allCatchSegments.get(0).start;
+                    Iterator<CatchBlockX> valueIterator = value.iterator();
+                    valueIterator.next();
+
+                    CatchBlockX nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
+                    Scope cur = new Scope();
+                    for (Block smallCatchSegment : allCatchSegments) {
+                        if (nextCatch != null && smallCatchSegment.start == nextCatch.start) {
+                            newTry.catchScopes.add(cur);
+
+                            nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
+                            cur = new Scope();
+                        }
+
+                        cur.blocks.add(smallCatchSegment);
+                    }
+                    newTry.catchScopes.add(cur);
+
+                    newTry.finallyScope.blocks.add(new Block(entry.getKey(), nextLabel));
+
+                    catchBlocksMap.remove(prefix);
+
+                    tempTryList.add(newTry);
+
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                Try newTry = new Try();
+
+                // No catch blocks.
+                newTry.tryScope.blocks.addAll(blocks);
+                newTry.finallyScope.blocks.add(new Block(entry.getKey(), nextLabel));
+
+                tempTryList.add(newTry);
+
+//                catchBlocksMap.put(blocks, List.of(finallyCatchBlockX));
+            }
+        }
+
+//        // catchBlocksMap now has all try-catch blocks without finally. They are irrelevant.
+//        // Or are they? What if there's a try-finally inside of catch block? That would be bad.
+//        for (Map.Entry<List<Block>, List<CatchBlockX>> e : catchBlocksMap.entrySet()) {
+//            System.out.println("Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
+//            for (Block tryBlock : e.getKey()) {
+//                AbstractInsnNode nextInstruction = findNextInstruction(tryBlock.end);
+//                if (nextInstruction.getOpcode() == GOTO) {
+//                    System.out.println("End label is most likely " + getLabelIndex(((JumpInsnNode) nextInstruction).label));
+//                }
+//            }
+//        }
+
+        tempTryList.sort(comparingInt((Try t) -> t.finallyScope.blocks.get(0).endIndex() - t.tryScope.blocks.get(0).startIndex())
+                .thenComparingInt(t -> t.tryScope.blocks.get(0).startIndex())
+        );
+
+        List<Try> tryList = new ArrayList<>();
+
+        tempTryListLoop:
+        while (!tempTryList.isEmpty()) {
+            Try first = tempTryList.remove(0);
+
+            for (Try nextTry : tempTryList) {
+                if (nextTry.tryScope.surrounds(first)) {
+                    nextTry.tryScope.nested.add(first);
+
+                    continue tempTryListLoop;
+                }
+
+                for (Scope catchScope : nextTry.catchScopes) {
+                    if (catchScope.surrounds(first)) {
+                        catchScope.nested.add(first);
+
+                        continue tempTryListLoop;
+                    }
+                }
+
+                if (nextTry.finallyScope.surrounds(first)) {
+                    nextTry.finallyScope.nested.add(first);
+
+                    continue tempTryListLoop;
+                }
+            }
+
+            tryList.add(first);
+        }
+
+        // Type of exception may be ignored, we don't need it.
+        for (Try aTry : tryList) {
+            aTry.print("");
+        }
+
+        return tryList;
+    }
+
+    private LabelNode findTheEndOfFinally(LabelNode startLabel) {
+        AbstractInsnNode instruction = findNextInstruction(startLabel);
+        assert isStore(instruction) : "No store instruction at the beginning of default finally block.";
+
+        var store = (VarInsnNode) instruction;
+
+        Set<LabelNode> jumpLabels = new HashSet<>();
+
+        while (true) {
+            instruction = instruction.getNext();
+
+            if (instruction == null) {
+                // Should not happen I guess.
+                return null;
+            }
+
+            if (instruction instanceof LabelNode) {
+                jumpLabels.remove((LabelNode) instruction);
+
+                continue;
+            }
+
+            if (instruction instanceof JumpInsnNode && instruction.getOpcode() != GOTO) {
+                LabelNode label = ((JumpInsnNode) instruction).label;
+
+                jumpLabels.add(label);
+
+                System.out.println("Jump to " + getLabelIndex(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
+
+                continue;
+            }
+
+            //noinspection DataFlowIssue
+            if (isLoad(instruction) && ((VarInsnNode) instruction).var == store.var) {
+                // Throw found.
+                return findNextLabel(instruction);
+            }
+
+            if (isReturn(instruction) || isThrow(instruction)) {
+                if (jumpLabels.isEmpty()) {
+                    return findPreviousLabel(instruction);
+                }
+            }
+        }
+    }
+
+    private boolean startsWith(List<Block> blocks, List<Block> prefix) {
+        if (blocks.size() < prefix.size()) {
+            return false;
+        }
+
+        return blocks.subList(0, prefix.size()).equals(prefix);
     }
 
     private AbstractInsnNode processFinallyMethodWithReturn(AbstractInsnNode node, MethodInsnNode methodInstruction, int var) {
@@ -183,7 +493,7 @@ class FinallyMethodNode extends MethodNode {
 
     private MethodInsnNode valueOf(char returnTypeDescriptor) {
         return new MethodInsnNode(INVOKESTATIC, toBoxedInternalName(returnTypeDescriptor),
-                "valueOf", getValueOfMethodDescriptor(returnTypeDescriptor),false);
+                "valueOf", getMethodDescriptorForValueOf(returnTypeDescriptor),false);
     }
 
     private MethodInsnNode optionalOf() {
@@ -191,177 +501,9 @@ class FinallyMethodNode extends MethodNode {
                 "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
     }
 
-    //todo not finished
-    @SuppressWarnings("unchecked")
-    private void initStoreInstructions() {
-        boolean[] catches = new boolean[labels.length];
-        for (TryCatchBlockNode block : super.tryCatchBlocks) {
-            if (block.start == block.handler) {
-                continue; // nasty bug in compiler :D
-            }
-            if (block.type != null) { // not a default finally block
-                catches[getLabelIndex(block.handler)] = true;
-                if (block.end == block.handler) {
-                    catches[getLabelIndex(block.start)] = true;
-                }
-            }
-        }
-
-        Map<Integer, IntBorelSet> tcfbs = new HashMap<>();
-
-        boolean[] finallies = new boolean[labels.length];
-        List<Block>[] catchFinallyBlocks = new List[labels.length];
-        List<Block>[] tryFinallyBlocks = new List[labels.length];
-        for (TryCatchBlockNode block : super.tryCatchBlocks) {
-            if (block.start == block.handler) {
-                continue; // nasty bug in compiler :D
-            }
-            if (block.type == null) { // default finally block
-                int tryOrCatchIndex = getLabelIndex(block.start);
-                int tryOrCatchEndIndex = getLabelIndex(block.end);
-                int handlerIndex = getLabelIndex(block.handler);
-                finallies[handlerIndex] = true;
-                if (catches[tryOrCatchIndex]) {
-                    if (catchFinallyBlocks[handlerIndex] == null) {
-                        catchFinallyBlocks[handlerIndex] = new ArrayList<>();
-                    }
-                    catchFinallyBlocks[handlerIndex].add(new Block(block.start, block.end));
-                } else {
-                    if (tryFinallyBlocks[handlerIndex] == null) {
-                        tryFinallyBlocks[handlerIndex] = new ArrayList<>();
-                    }
-                    tryFinallyBlocks[handlerIndex].add(new Block(block.start, block.end));
-                }
-
-                tcfbs.computeIfAbsent(handlerIndex, i -> new IntBorelSet())
-                        .add(tryOrCatchIndex, tryOrCatchEndIndex)
-                        .add(handlerIndex, handlerIndex); //?
-            }
-        }
-        // detection of finally blocks boundaries
-        for (Map.Entry<Integer, IntBorelSet> entry : tcfbs.entrySet()) {
-            AbstractInsnNode instruction = findNextInstruction(getLabel(entry.getKey()));
-            if (isStoreInstruction(instruction)) {
-                VarInsnNode storeInstruction = (VarInsnNode) instruction;
-                int index = -1;
-                for (AbstractInsnNode node = storeInstruction; node != null; node = node.getNext()) {
-                    if (isLoadInstruction(node) && ((VarInsnNode) node).var == storeInstruction.var) {
-                        LabelNode label = findNextLabel(node);
-                        index = label == null ? labels.length : getLabelIndex(label);
-                        break;
-                    }
-                }
-                if (index == -1) {
-                    throw new RuntimeException("There's no ALOAD instruction in the end of final finally block");
-                }
-                entry.getValue().add(index, index);
-            } else {
-                throw new RuntimeException("There's no ASTORE instruction in the beginning of final finally block");
-            }
-        }
-//        for (TryCatchBlockNode block : (List<TryCatchBlockNode>) super.tryCatchBlocks) {
-//            if (block.start == block.handler) {
-//                continue; // nasty bug in compiler :D
-//            }
-//            if (block.type != null) { // not a default finally block
-//
-////                catches[getLabelIndex(block.handler)] = true;
-////                if (block.end == block.handler) {
-////                    catches[getLabelIndex(block.start)] = true;
-////                }
-//            }
-//        }
-        System.out.println("========================================");
-        System.out.println(super.name);
-        // tcfbs maps "finally block label index" to the set of intervals that lead to this finally block.
-        Map<Integer, Integer> catchBlocksIndexes = new HashMap<>();
-        for (Map.Entry<Integer, IntBorelSet> entry : tcfbs.entrySet()) {
-            System.out.println(entry.getValue());
-            System.out.println("Default finally block at " + entry.getKey());
-//            System.out.println(isStoreInstruction(findNextInstruction(getLabel(entry.getKey()))));
-            for (TryCatchBlockNode block : super.tryCatchBlocks) {
-                if (block.start == block.handler) {
-                    continue; // indicates place where exception is stored
-                }
-                if (block.type != null) { // not a default finally block
-//                    if (entry.getValue().convexHaul().l == getLabelIndex(block.start)/* && entry.getValue().convexHaul().r > getLabelIndex(block.end)*/) {
-                    int handlerIndex = getLabelIndex(block.handler);
-                    int startIndex = (block.end == block.handler) ? getLabelIndex(block.start) : handlerIndex;
-                    catchBlocksIndexes.put(startIndex, handlerIndex);
-//                        System.out.println("Catch block at " + getLabelIndex(block.handler)); // WRONG??? Maybe not
-//                        System.out.println(isStoreInstruction(findNextInstruction(block.handler)));
-//                    }
-                }
-            }
-        }
-        System.out.println("Catch blocks at " + catchBlocksIndexes);
-
-        class Info {
-            public final ReturnOrThrow rot;
-            public final int startIndex;
-
-            public Info(ReturnOrThrow rot, int startIndex) {
-                this.rot = rot;
-                this.startIndex = startIndex;
-            }
-        }
-
-        Map<IntBorelSet.IntSegment, Info> rotMap = new HashMap<>();
-        for (Map.Entry<Integer, IntBorelSet> entry : tcfbs.entrySet()) {
-            int finalHandler = entry.getKey();
-            IntBorelSet info = entry.getValue();
-
-            IntBorelSet.IntSegment[] segments = info.segments();
-            int length = segments.length;
-
-            rotMap.put(new IntBorelSet.IntSegment(segments[length - 2].r, segments[length - 2].l), new Info(ReturnOrThrow.THROW, segments[length - 2].r));
-//            for (int i = 0; i < length - 2; i++) {
-//
-//            }
-        }
-
-        storeInstructions = new VarInsnNode[labels.length];
-        returnOrThrows = new ReturnOrThrow[labels.length];
-
-        for (int i = 0; i < labels.length; i++) {
-            if (finallies[i]) {
-                AbstractInsnNode instruction = findNextInstruction(getLabel(i));
-                if (isStoreInstruction(instruction)) {
-                    VarInsnNode storeInstruction = (VarInsnNode) instruction;
-                    storeInstructions[i] = storeInstruction;
-                    returnOrThrows[i] = ReturnOrThrow.THROW;
-                }
-            }
-        }
-        for (List<Block> catchBlockList : catchFinallyBlocks) {
-            if (catchBlockList == null) continue;
-
-            for (Block block : catchBlockList) {
-                AbstractInsnNode instruction = findNextInstruction(block.end); // or prev?
-                if (isStoreInstruction(instruction)) {
-                    VarInsnNode storeInstruction = (VarInsnNode) instruction;
-
-                    int i = getLabelIndex(block.end);
-                    storeInstructions[i] = storeInstruction;
-                    returnOrThrows[i] = ReturnOrThrow.THROW;
-                }
-            }
-        }
-
-        for (List<Block> tryBlockList : tryFinallyBlocks) {
-            if (tryBlockList == null) continue;
-
-            for (Block block : tryBlockList) {
-                AbstractInsnNode instruction = findPreviousInstruction(block.end);
-                if (isStoreInstruction(instruction)) {
-                    VarInsnNode storeInstruction = (VarInsnNode) instruction;
-
-                    int i = getLabelIndex(block.end);
-                    storeInstructions[i] = storeInstruction;
-                    returnOrThrows[i] = ReturnOrThrow.RETURN;
-                }
-            }
-        }
+    private static boolean skipBlock(TryCatchBlockNode block) {
+        // Nasty bug in compiler?
+        return block.start == block.handler;
     }
 
     private AbstractInsnNode replaceInstruction(AbstractInsnNode from, AbstractInsnNode to) {
@@ -373,15 +515,21 @@ class FinallyMethodNode extends MethodNode {
         return to;
     }
 
-    @Deprecated
     private final class Block {
-
         final LabelNode start;
         final LabelNode end;
 
         Block(LabelNode start, LabelNode end) {
             this.start = start;
             this.end = end;
+        }
+
+        int startIndex() {
+            return getLabelIndex(start);
+        }
+
+        int endIndex() {
+            return getLabelIndex(end);
         }
 
         @Override
@@ -396,12 +544,17 @@ class FinallyMethodNode extends MethodNode {
 
         @Override
         public int hashCode() {
-            return 31 * start.hashCode() + end.hashCode();
+            return start.hashCode() ^ end.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return "[" + getLabelIndex(start) + ", " + (end == null ? "end" : getLabelIndex(end)) + ")";
         }
     }
 
     private enum ReturnOrThrow {
-        RETURN, THROW
+        RETURN, THROW, NOOP
     }
 
     private void initLabelsCache() {
@@ -423,105 +576,5 @@ class FinallyMethodNode extends MethodNode {
 
     private int getLabelIndex(LabelNode label) {
         return labelsMap.get(label);
-    }
-
-    private static class IntBorelSet {
-
-        public static class IntSegment implements Comparable<IntSegment> {
-
-            public final int l;
-            public final int r;
-
-            public IntSegment(int l, int r) {
-                this.l = l;
-                this.r = r;
-            }
-
-            public boolean contains(int i) {
-                return l <= i && i <= r;
-            }
-
-            @Override
-            public int compareTo(IntSegment o) {
-                int c = Integer.compare(l, o.l);
-                if (c == 0) {
-                    c = Integer.compare(r, o.r);
-                }
-                return c;
-            }
-
-            @Override
-            public boolean equals(Object o) {
-                if (this == o) return true;
-                if (o == null || getClass() != o.getClass()) return false;
-                IntSegment that = (IntSegment) o;
-                return l == that.l && r == that.r;
-            }
-
-            @Override
-            public int hashCode() {
-                return l ^ r;
-            }
-
-            @Override
-            public String toString() {
-                return "[" + l + ", " + r + ")";
-            }
-        }
-
-        private final NavigableSet<IntSegment> segments = new TreeSet<>();
-
-        public IntBorelSet add(int l, int r) {
-            IntSegment c = new IntSegment(l, r);
-            if (!segments.contains(c)) {
-
-                IntSegment lower = segments.lower(c);
-                if (lower != null && lower.r >= l) {
-                    segments.remove(lower);
-                    c = new IntSegment(lower.l, r);
-                }
-
-                IntSegment higher = segments.higher(c);
-                if (higher != null && higher.l <= r) {
-                    segments.remove(higher);
-                    c = new IntSegment(l, higher.r);
-                }
-
-                segments.add(c);
-            }
-            return this;
-        }
-
-        public boolean contains(int i) {
-            IntSegment c = new IntSegment(i, Integer.MAX_VALUE);
-            IntSegment lower = segments.lower(c);
-            return lower != null && i < lower.r;
-        }
-
-        public IntSegment convexHaul() {
-            if (segments.isEmpty()) {
-                throw new UnsupportedOperationException();
-            }
-            return new IntSegment(segments.first().l, segments.last().r);
-        }
-
-        public IntSegment[] segments() {
-            return segments.toArray(new IntSegment[] {});
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            return this == o || o != null && getClass() == o.getClass() && segments.equals(((IntBorelSet) o).segments);
-        }
-
-        @Override
-        public int hashCode() {
-            return segments.hashCode();
-        }
-
-        @Override
-        public String toString() {
-            return segments.toString();
-        }
     }
 }

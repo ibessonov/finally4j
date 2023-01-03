@@ -50,6 +50,9 @@ class FinallyClassFileTransformer implements ClassFileTransformer {
 
         if (!cr.hasFinallyReferenced) return null;
 
+        System.out.println();
+        System.out.println("Transforming " + className);
+
         var cv = new ClassVisitor0(cw);
         cr.accept(cv, 0);
 

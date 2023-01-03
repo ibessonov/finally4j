@@ -17,15 +17,19 @@ package com.github.ibessonov.finally4j;
 
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 
 import static org.objectweb.asm.Opcodes.ALOAD;
 import static org.objectweb.asm.Opcodes.ASM7;
 import static org.objectweb.asm.Opcodes.ASTORE;
+import static org.objectweb.asm.Opcodes.ATHROW;
 import static org.objectweb.asm.Opcodes.DLOAD;
 import static org.objectweb.asm.Opcodes.FLOAD;
 import static org.objectweb.asm.Opcodes.ILOAD;
+import static org.objectweb.asm.Opcodes.IRETURN;
 import static org.objectweb.asm.Opcodes.ISTORE;
 import static org.objectweb.asm.Opcodes.LLOAD;
+import static org.objectweb.asm.Opcodes.RETURN;
 import static org.objectweb.asm.tree.AbstractInsnNode.LABEL;
 
 /**
@@ -34,11 +38,25 @@ import static org.objectweb.asm.tree.AbstractInsnNode.LABEL;
 class Util {
     static int ASM_V = ASM7;
 
+    static AbstractInsnNode findPreviousInstruction(AbstractInsnNode node) {
+        do {
+            node = node.getPrevious();
+        } while (node.getOpcode() == -1);
+        return node;
+    }
+
     static AbstractInsnNode findNextInstruction(AbstractInsnNode node) {
         do {
             node = node.getNext();
-        } while (node.getOpcode() == -1);
+        } while (node != null && node.getOpcode() == -1);
         return node;
+    }
+
+    static LabelNode findPreviousLabel(AbstractInsnNode node) {
+        do {
+            node = node.getPrevious();
+        } while (node != null && node.getType() != LABEL);
+        return (LabelNode) node;
     }
 
     static LabelNode findNextLabel(AbstractInsnNode node) {
@@ -48,21 +66,29 @@ class Util {
         return (LabelNode) node;
     }
 
-    static AbstractInsnNode findPreviousInstruction(AbstractInsnNode node) {
-        do {
-            node = node.getPrevious();
-        } while (node.getOpcode() == -1);
-        return node;
-    }
-
-    static boolean isStoreInstruction(AbstractInsnNode instruction) {
-        int opcode = instruction.getOpcode();
+    static boolean isStore(AbstractInsnNode node) {
+        int opcode = node.getOpcode();
         return ISTORE <= opcode && opcode <= ASTORE;
     }
 
-    static boolean isLoadInstruction(AbstractInsnNode instruction) {
-        int opcode = instruction.getOpcode();
+    static boolean isLoad(AbstractInsnNode node) {
+        int opcode = node.getOpcode();
         return ILOAD <= opcode && opcode <= ALOAD;
+    }
+
+    static boolean isReturn(AbstractInsnNode instruction) {
+        int opcode = instruction.getOpcode();
+        return IRETURN <= opcode && opcode <= RETURN;
+    }
+
+    static boolean isThrow(AbstractInsnNode instruction) {
+        int opcode = instruction.getOpcode();
+        return opcode == ATHROW;
+    }
+
+    static boolean defaultFinallyBlock(TryCatchBlockNode block) {
+        // Default finally block has "null" throwable type instead of "Throwable".
+        return block.type == null;
     }
 
     static String toBoxedInternalName(char type) {
@@ -107,7 +133,7 @@ class Util {
         }
     }
 
-    static String getValueOfMethodDescriptor(char type) {
+    static String getMethodDescriptorForValueOf(char type) {
         return "(" + type + ")L" + toBoxedInternalName(type) + ";";
     }
 
