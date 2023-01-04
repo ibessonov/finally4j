@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static com.github.ibessonov.finally4j.FinallyAgentPreMain.DEBUG;
 import static com.github.ibessonov.finally4j.Util.ASM_V;
 import static com.github.ibessonov.finally4j.Util.findNextInstruction;
 import static com.github.ibessonov.finally4j.Util.findNextLabel;
@@ -76,8 +77,6 @@ class FinallyMethodNode extends MethodNode {
 
     private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
     private LabelNode[] labels = null;
-    private VarInsnNode[] storeInstructions;
-    private ReturnOrThrow[] returnOrThrows;
 
     FinallyMethodNode(Runnable methodChanged, MethodVisitor outerMv,
                       int access, String name, String desc, String signature, String[] exceptions) {
@@ -88,19 +87,28 @@ class FinallyMethodNode extends MethodNode {
 
     @Override
     public void visitEnd() {
-        System.out.println("========================================");
-        System.out.println(super.name);
-
         initLabelsCache();
 
         List<Try> tryList;
 
         try {
-            tryList = printInferredStructure();
+            tryList = inferTheStructure();
         } catch (Throwable e) {
             e.printStackTrace();
 
             throw e;
+        }
+
+        if (tryList.isEmpty()) {
+            super.accept(outerMv);
+
+            return;
+        }
+
+        if (DEBUG) {
+            System.out.println("  Transforming method '" + super.name + super.desc + "':");
+
+            tryList.forEach(aTry -> aTry.print("    "));
         }
 
         for (Try aTry : tryList) {
@@ -113,7 +121,25 @@ class FinallyMethodNode extends MethodNode {
                     Block nextBlock;
 
                     if (tryBlock == tryScope.last()) {
-                        nextBlock = aTry.catchScopes.isEmpty() ? aTry.finallyScope.first() : aTry.catchScopes.get(0).first();
+                        /*
+                         * You can't just read the next catch or finally block, that would be too easy, right?
+                         * That's because 2 last finally blocks can be slapped together, for example, here:
+                         * try {
+                         *     if (foo()) return bar();
+                         * } finally {
+                         *     baz();
+                         * }
+                         * It means that the "last" finally block must be split manually.
+                         */
+                        //TODO Here we may have a false-positive detection of a "return" finally block.
+                        // nextBlock = aTry.catchScopes.isEmpty() ? aTry.finallyScope.first() : aTry.catchScopes.get(0).first();
+                        //TODO Of there's no return in "try" at all, we may fail on assertion inside of the next line.
+                        // How to avoid it: if default finally doesn't end with "return", we can derive that the
+                        // "load" and "return" at the end mean that the block is in fact a return block.
+                        // Checking the first "store" is DEFINITELY NOT ENOUGH.
+                        LabelNode theEndOfFinally = findTheEndOfFinally(tryBlock.end, false);
+
+                        nextBlock = new Block(theEndOfFinally, null);
                     } else {
                         nextBlock = tryScope.blocks.get(i + 1);
                     }
@@ -126,8 +152,13 @@ class FinallyMethodNode extends MethodNode {
                 }
 
                 //TODO This code is bad. It doesn't cover nested stuff at all.
-                System.out.println("Finally block in try = " + finallyBlock);
+                System.out.println("  Finally block in try " + finallyBlock);
                 AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
+                //TODO Not the best way to find "return" finally blocks.
+                // May be false-positive if there's a simple assignment at the end.
+                // One way to avoid that would be checking the end of "finally" block for corresponding "load" instruction.
+                // But, it only works when the finally block itself doesn't have a return or throw at the end, that is
+                // the worst case scenario. There's no way to tell the difference then. I guess I just document it and that's it.
                 if (isStore(previousInstruction)) {
                     VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
 
@@ -156,6 +187,10 @@ class FinallyMethodNode extends MethodNode {
             }
         }
 
+        if (DEBUG) {
+            System.out.println();
+        }
+
         super.accept(outerMv);
     }
 
@@ -181,7 +216,7 @@ class FinallyMethodNode extends MethodNode {
                 }
             }
 
-            System.out.println(padding + "} finally " + finallyScope.blocks.get(0) + " {");
+            System.out.println(padding + "} finally " + finallyScope.first() + " {");
             for (Try nestedTry : finallyScope.nested) {
                 nestedTry.print(nestedPadding);
             }
@@ -214,7 +249,7 @@ class FinallyMethodNode extends MethodNode {
         }
     }
 
-    private List<Try> printInferredStructure() {
+    private List<Try> inferTheStructure() {
 //        for (TryCatchBlockNode block : super.tryCatchBlocks) {
 //            System.out.println("try-catch-block: " + getLabelIndex(block.start) + " " + getLabelIndex(block.end) + " " + getLabelIndex(block.handler) + " (" + block.type + ")");
 //
@@ -265,11 +300,9 @@ class FinallyMethodNode extends MethodNode {
 
             List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
 
-            LabelNode nextLabel = findTheEndOfFinally(entry.getKey());
+            LabelNode nextLabel = findTheEndOfFinally(entry.getKey(), true);
 
             boolean found = false;
-//
-//            CatchBlockX finallyCatchBlockX = new CatchBlockX(null, entry.getKey());
 
             for (Map.Entry<List<Block>, List<CatchBlockX>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
                 List<Block> prefix = catchBlocksMapEntry.getKey();
@@ -373,16 +406,13 @@ class FinallyMethodNode extends MethodNode {
             tryList.add(first);
         }
 
-        // Type of exception may be ignored, we don't need it.
-        for (Try aTry : tryList) {
-            aTry.print("");
-        }
-
         return tryList;
     }
 
-    private LabelNode findTheEndOfFinally(LabelNode startLabel) {
-        AbstractInsnNode instruction = findNextInstruction(startLabel);
+    private LabelNode findTheEndOfFinally(LabelNode startLabel, boolean defaultBlock) {
+        AbstractInsnNode instruction = defaultBlock
+                ? findNextInstruction(startLabel)
+                : findPreviousInstruction(startLabel);
         assert isStore(instruction) : "No store instruction at the beginning of default finally block.";
 
         var store = (VarInsnNode) instruction;
@@ -408,7 +438,9 @@ class FinallyMethodNode extends MethodNode {
 
                 jumpLabels.add(label);
 
-                System.out.println("Jump to " + getLabelIndex(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
+                if (DEBUG) {
+                    System.out.println("  Jump to " + getLabelIndex(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
+                }
 
                 continue;
             }

@@ -58,7 +58,7 @@
                     </dependency>
                 </dependencies>
                 <configuration>
-                    <argLine>-javaagent:../agent/target/finally4j-agent-${revision}.jar</argLine>
+                    <argLine>-javaagent:../agent/target/finally4j-agent-${revision}.jar -Dfinally4j.debug=true</argLine>
                 </configuration>
             </plugin>
             <plugin>

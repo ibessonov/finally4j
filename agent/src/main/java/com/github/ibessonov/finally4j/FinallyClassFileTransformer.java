@@ -23,6 +23,7 @@ import org.objectweb.asm.MethodVisitor;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
+import static com.github.ibessonov.finally4j.FinallyAgentPreMain.DEBUG;
 import static com.github.ibessonov.finally4j.Util.ASM_V;
 import static org.objectweb.asm.ClassWriter.COMPUTE_FRAMES;
 import static org.objectweb.asm.ClassWriter.COMPUTE_MAXS;
@@ -50,8 +51,9 @@ class FinallyClassFileTransformer implements ClassFileTransformer {
 
         if (!cr.hasFinallyReferenced) return null;
 
-        System.out.println();
-        System.out.println("Transforming " + className);
+        if (DEBUG) {
+            System.out.println("Transforming class " + className.replace('/', '.'));
+        }
 
         var cv = new ClassVisitor0(cw);
         cr.accept(cv, 0);

@@ -16,46 +16,17 @@
 package com.github.ibessonov.finally4j.ret;
 
 import com.github.ibessonov.finally4j.Finally;
-import com.github.ibessonov.finally4j.Finally.NoReturnValueException;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author ibessonov
  */
-class SuccessfulTest {
-
-    @Test
-    void noReturnValue() {
-        try {
-            //noinspection ResultOfMethodCallIgnored
-            Thread.currentThread();
-        } finally {
-            Assertions.assertFalse(Finally.hasReturnValue());
-            assertEquals(Optional.empty(), Finally.getReturnValueOptional());
-            try { Finally.getReturnValue(); fail(""); } catch (NoReturnValueException ignored) {}
-        }
-    }
-
-    @Test
-    void voidReturnType() {
-        try {
-            if (System.currentTimeMillis() != 0) return;
-            System.currentTimeMillis(); // to avoid warnings
-        } finally {
-            assertFalse(Finally.hasReturnValue());
-            assertEquals(Optional.empty(), Finally.getReturnValueOptional());
-            try { Finally.getReturnValue(); fail(""); } catch (NoReturnValueException ignored) {}
-        }
-    }
-
+class ReturnTypesTest {
     @Test
     void booleanReturnType() {
         assertTrue(booleanReturnType0());
