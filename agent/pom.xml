@@ -37,27 +37,16 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>2.4</version>
                 <configuration>
                     <archive>
                         <manifestEntries>
                             <Built-By>ibessonov</Built-By>
-                            <PreMain-Class>com.github.ibessonov.finally4j.FinallyAgentPreMain</PreMain-Class>
+                            <PreMain-Class>com.github.ibessonov.finally4j.agent.FinallyAgentPreMain</PreMain-Class>
                         </manifestEntries>
                     </archive>
                     <excludes>
                         <exclude>**/Constants.class</exclude>
                     </excludes>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.6.0</version>
-                <configuration>
-                    <compilerArgs>
-                        <compilerArg>-g:none</compilerArg>
-                    </compilerArgs>
                 </configuration>
             </plugin>
         </plugins>

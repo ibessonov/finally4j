@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.ibessonov.finally4j;
+package com.github.ibessonov.finally4j.agent.transformer;
 
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.AbstractInsnNode;
@@ -34,23 +34,25 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import static com.github.ibessonov.finally4j.FinallyAgentPreMain.DEBUG;
-import static com.github.ibessonov.finally4j.Util.ASM_V;
-import static com.github.ibessonov.finally4j.Util.findNextInstruction;
-import static com.github.ibessonov.finally4j.Util.findNextLabel;
-import static com.github.ibessonov.finally4j.Util.findPreviousInstruction;
-import static com.github.ibessonov.finally4j.Util.findPreviousLabel;
-import static com.github.ibessonov.finally4j.Util.getMethodDescriptorForValueOf;
-import static com.github.ibessonov.finally4j.Util.isLoad;
-import static com.github.ibessonov.finally4j.Util.isReturn;
-import static com.github.ibessonov.finally4j.Util.isStore;
-import static com.github.ibessonov.finally4j.Util.isThrow;
-import static com.github.ibessonov.finally4j.Util.loadOpcode;
-import static com.github.ibessonov.finally4j.Util.toBoxedInternalName;
-import static com.github.ibessonov.finally4j.Util.toPrimitiveName;
+import static com.github.ibessonov.finally4j.agent.FinallyAgentPreMain.DEBUG;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.ASM_V;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextInstruction;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextLabel;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousInstruction;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousLabel;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.getMethodDescriptorForValueOf;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.isLoad;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.isReturn;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.isStore;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.isThrow;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
 import static java.util.Comparator.comparingInt;
 import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toList;
@@ -89,15 +91,7 @@ class FinallyMethodNode extends MethodNode {
     public void visitEnd() {
         initLabelsCache();
 
-        List<Try> tryList;
-
-        try {
-            tryList = inferTheStructure();
-        } catch (Throwable e) {
-            e.printStackTrace();
-
-            throw e;
-        }
+        List<Try> tryList = inferTheStructure();
 
         if (tryList.isEmpty()) {
             super.accept(outerMv);
@@ -121,6 +115,10 @@ class FinallyMethodNode extends MethodNode {
                     Block nextBlock;
 
                     if (tryBlock == tryScope.last()) {
+                        if (!isStore(findPreviousInstruction(tryBlock.end))) {
+                            break;
+                        }
+
                         /*
                          * You can't just read the next catch or finally block, that would be too easy, right?
                          * That's because 2 last finally blocks can be slapped together, for example, here:
@@ -133,7 +131,6 @@ class FinallyMethodNode extends MethodNode {
                          */
                         //TODO Here we may have a false-positive detection of a "return" finally block.
                         // nextBlock = aTry.catchScopes.isEmpty() ? aTry.finallyScope.first() : aTry.catchScopes.get(0).first();
-                        //TODO Of there's no return in "try" at all, we may fail on assertion inside of the next line.
                         // How to avoid it: if default finally doesn't end with "return", we can derive that the
                         // "load" and "return" at the end mean that the block is in fact a return block.
                         // Checking the first "store" is DEFINITELY NOT ENOUGH.
@@ -192,6 +189,40 @@ class FinallyMethodNode extends MethodNode {
         }
 
         super.accept(outerMv);
+    }
+
+    private Stream<TryCatchBlockNode> splitTryCatchBlockNode(TryCatchBlockNode block) {
+        //TODO Quadratic algorithm, bullshit.
+        // To be fair, it will probably stay quadratic after optimization, because there's no point optimizing it
+        // further. All I need to do is pre-calculate the initial filtration of the stream. The result will be quite
+        // short, generally speaking.
+        Optional<TryCatchBlockNode> optionalB = tryCatchBlocks.stream()
+                .filter(not(FinallyMethodNode::skipBlock))
+                .filter(not(Util::defaultFinallyBlock))
+                .filter(b -> b.end == b.handler)
+                .filter(b -> b.start == block.start && getLabelIndex(b.end) < getLabelIndex(block.end))
+                .findAny();
+
+        return optionalB.map(b -> {
+            return Stream.concat(
+                    Stream.of(new TryCatchBlockNode(block.start, b.end, block.handler, block.type)),
+                    // Recurtion matters. What if some idiot writes something like this:
+                    /*
+                     * try {
+                     *     throw new Exception();
+                     * } catch (E0 e0) {
+                     *     throw new Exception();
+                     * } catch (E1 e1) {
+                     *     throw new Exception();
+                     * } finally {
+                     *     // ...
+                     * }
+                     */
+                    // That would be very stupid, bit Java allows it.
+                    //TODO It's not tested actually, maybe I'm wrong.
+                    splitTryCatchBlockNode(new TryCatchBlockNode(b.end, block.end, block.handler, block.type))
+            );
+        }).orElse(Stream.of(block));
     }
 
     static class Try {
@@ -268,6 +299,7 @@ class FinallyMethodNode extends MethodNode {
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
                 .filter(not(FinallyMethodNode::skipBlock))
                 .filter(Util::defaultFinallyBlock)
+                .flatMap(this::splitTryCatchBlockNode)
                 .collect(Collectors.groupingBy(block -> block.handler));
 
         concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
@@ -362,11 +394,11 @@ class FinallyMethodNode extends MethodNode {
 //        // catchBlocksMap now has all try-catch blocks without finally. They are irrelevant.
 //        // Or are they? What if there's a try-finally inside of catch block? That would be bad.
 //        for (Map.Entry<List<Block>, List<CatchBlockX>> e : catchBlocksMap.entrySet()) {
-//            System.out.println("Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
+//            System.out.println("  Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
 //            for (Block tryBlock : e.getKey()) {
 //                AbstractInsnNode nextInstruction = findNextInstruction(tryBlock.end);
 //                if (nextInstruction.getOpcode() == GOTO) {
-//                    System.out.println("End label is most likely " + getLabelIndex(((JumpInsnNode) nextInstruction).label));
+//                    System.out.println("  End label is most likely " + getLabelIndex(((JumpInsnNode) nextInstruction).label));
 //                }
 //            }
 //        }
@@ -478,8 +510,11 @@ class FinallyMethodNode extends MethodNode {
                 switch (methodInstruction.name) {
                     case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
                         super.instructions.insert(node, optionalOfNullable());
+
+                    //noinspection fallthrough
                     case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
                         break;
+
                     default:
                         char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
                         String primitiveName = toPrimitiveName(currentType);
@@ -494,9 +529,12 @@ class FinallyMethodNode extends MethodNode {
                 switch (methodInstruction.name) {
                     case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
                         super.instructions.insert(node, optionalOf());
+
+                    //noinspection fallthrough
                     case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
                         super.instructions.insert(node, valueOf(returnType));
                         break;
+
                     default:
                         char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
                         if (currentType != returnType) {

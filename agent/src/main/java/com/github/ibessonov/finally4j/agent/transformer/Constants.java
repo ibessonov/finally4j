@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.ibessonov.finally4j;
+package com.github.ibessonov.finally4j.agent.transformer;
 
 interface Constants {
     String FINALLY_CLASS_INTERNAL_NAME = "com/github/ibessonov/finally4j/Finally";

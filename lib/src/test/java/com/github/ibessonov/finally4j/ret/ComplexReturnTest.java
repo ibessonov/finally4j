@@ -38,11 +38,8 @@ class ComplexReturnTest {
     }
 
     /**
-     * TODO There's a bug in matching catches with default finally blocks.
-     * When try block ends with throwing an exception, its scope is merged with the following catch clause. This means
-     * that there will not be 2 separate blocks like (0, 1, 7, null) and (1, 2, 7, null), it'll go straight to the
-     * (0, 2, 7, null), while the "catch" block would still have the correct information (0, 1, 1, j.l.Exception).
-     * Fuck terminal throw statements, they suck. But I must handle them anyway.
+     * TODO Disabled because right now I only handle what's in "try", everything else is ignored.
+     *  Pretty easy to fix, but it requires a fair bit of refactoring. I'm not afraid of that, of course.
      */
     @Test
     @Disabled
@@ -92,8 +89,7 @@ class ComplexReturnTest {
 
     private static String conditionInCatchBlock0(boolean hasReturnValue) {
         try {
-            return null;
-//            throw new Exception();
+            throw new Exception();
         } catch (Exception e) {
             if (hasReturnValue) {
                 return "true";
@@ -113,8 +109,7 @@ class ComplexReturnTest {
 
     private static String conditionInCatchBlock1(boolean hasReturnValue) {
         try {
-            return null;
-//            throw new Exception();
+            throw new Exception();
         } catch (Exception e) {
             if (hasReturnValue) {
                 return "true";
