@@ -34,9 +34,11 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static com.github.ibessonov.finally4j.agent.FinallyAgentPreMain.DEBUG;
@@ -106,17 +108,15 @@ class FinallyMethodNode extends MethodNode {
         }
 
         for (Try aTry : tryList) {
-            Scope tryScope = aTry.tryScope;
-
-            for (int i = 0; i < tryScope.blocks.size(); i++) {
-                Block finallyBlock; {
-                    Block tryBlock = tryScope.blocks.get(i);
+            Stream<Block> returnFinallyBlocks = Stream.concat(Stream.of(aTry.tryScope), aTry.catchScopes.stream()).flatMap(scope -> {
+                return IntStream.range(0, scope.blocks.size()).mapToObj(i -> {
+                    Block block = scope.blocks.get(i);
 
                     Block nextBlock;
 
-                    if (tryBlock == tryScope.last()) {
-                        if (!isStore(findPreviousInstruction(tryBlock.end))) {
-                            break;
+                    if (block == scope.last()) {
+                        if (!isStore(findPreviousInstruction(block.end))) {
+                            return null; // This one should end with exceptional finally block, so I ignore it.
                         }
 
                         /*
@@ -130,24 +130,21 @@ class FinallyMethodNode extends MethodNode {
                          * It means that the "last" finally block must be split manually.
                          */
                         //TODO Here we may have a false-positive detection of a "return" finally block.
-                        // nextBlock = aTry.catchScopes.isEmpty() ? aTry.finallyScope.first() : aTry.catchScopes.get(0).first();
                         // How to avoid it: if default finally doesn't end with "return", we can derive that the
                         // "load" and "return" at the end mean that the block is in fact a return block.
                         // Checking the first "store" is DEFINITELY NOT ENOUGH.
-                        LabelNode theEndOfFinally = findTheEndOfFinally(tryBlock.end, false);
+                        LabelNode theEndOfFinally = findTheEndOfFinally(block.end, false);
 
                         nextBlock = new Block(theEndOfFinally, null);
                     } else {
-                        nextBlock = tryScope.blocks.get(i + 1);
+                        nextBlock = scope.blocks.get(i + 1);
                     }
 
-                    finallyBlock = new Block(tryBlock.end, nextBlock.start);
-                }
+                    return new Block(block.end, nextBlock.start);
+                });
+            }).filter(Objects::nonNull).filter(b -> b.startIndex() < b.endIndex());
 
-                if (finallyBlock.startIndex() >= finallyBlock.endIndex()) {
-                    continue;
-                }
-
+            returnFinallyBlocks.forEach(finallyBlock -> {
                 //TODO This code is bad. It doesn't cover nested stuff at all.
                 System.out.println("  Finally block in try " + finallyBlock);
                 AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
@@ -181,7 +178,7 @@ class FinallyMethodNode extends MethodNode {
                         }
                     }
                 }
-            }
+            });
         }
 
         if (DEBUG) {

@@ -16,7 +16,6 @@
 package com.github.ibessonov.finally4j.ret;
 
 import com.github.ibessonov.finally4j.Finally;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -37,12 +36,7 @@ class ComplexReturnTest {
         assertEquals("true", conditionInTryBlock1(true));
     }
 
-    /**
-     * TODO Disabled because right now I only handle what's in "try", everything else is ignored.
-     *  Pretty easy to fix, but it requires a fair bit of refactoring. I'm not afraid of that, of course.
-     */
     @Test
-    @Disabled
     void conditionInCatchBlock() {
         assertEquals("false", conditionInCatchBlock0(false));
         assertEquals("false", conditionInCatchBlock1(false));
