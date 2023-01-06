@@ -35,7 +35,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -47,7 +46,6 @@ import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextInst
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextLabel;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousInstruction;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousLabel;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.getMethodDescriptorForValueOf;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.isLoad;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.isReturn;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.isStore;
@@ -56,7 +54,7 @@ import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
 import static java.util.Comparator.comparingInt;
-import static java.util.function.Predicate.not;
+import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Stream.concat;
 import static org.objectweb.asm.Opcodes.ATHROW;
@@ -82,6 +80,8 @@ class FinallyMethodNode extends MethodNode {
     private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
     private LabelNode[] labels = null;
 
+    private List<TryCatchBlockNode> mergedTryCatchBlocks = new ArrayList<>();
+
     FinallyMethodNode(Runnable methodChanged, MethodVisitor outerMv,
                       int access, String name, String desc, String signature, String[] exceptions) {
         super(ASM_V, access, name, desc, signature, exceptions);
@@ -91,7 +91,13 @@ class FinallyMethodNode extends MethodNode {
 
     @Override
     public void visitEnd() {
-        initLabelsCache();
+        readLabels();
+
+        tryCatchBlocks.stream()
+                .filter(Util::validBlock)
+                .filter(Util::regularCatch)
+                .filter(b -> b.end == b.handler)
+                .collect(toCollection(() -> mergedTryCatchBlocks));
 
         List<Try> tryList = inferTheStructure();
 
@@ -108,7 +114,7 @@ class FinallyMethodNode extends MethodNode {
         }
 
         for (Try aTry : tryList) {
-            Stream<Block> returnFinallyBlocks = Stream.concat(Stream.of(aTry.tryScope), aTry.catchScopes.stream()).flatMap(scope -> {
+            Stream<Block> returnFinallyBlocks = concat(Stream.of(aTry.tryScope), aTry.catchScopes.stream()).flatMap(scope -> {
                 return IntStream.range(0, scope.blocks.size()).mapToObj(i -> {
                     Block block = scope.blocks.get(i);
 
@@ -189,37 +195,19 @@ class FinallyMethodNode extends MethodNode {
     }
 
     private Stream<TryCatchBlockNode> splitTryCatchBlockNode(TryCatchBlockNode block) {
-        //TODO Quadratic algorithm, bullshit.
-        // To be fair, it will probably stay quadratic after optimization, because there's no point optimizing it
-        // further. All I need to do is pre-calculate the initial filtration of the stream. The result will be quite
-        // short, generally speaking.
-        Optional<TryCatchBlockNode> optionalB = tryCatchBlocks.stream()
-                .filter(not(FinallyMethodNode::skipBlock))
-                .filter(not(Util::defaultFinallyBlock))
-                .filter(b -> b.end == b.handler)
+        return mergedTryCatchBlocks.stream()
                 .filter(b -> b.start == block.start && getLabelIndex(b.end) < getLabelIndex(block.end))
-                .findAny();
-
-        return optionalB.map(b -> {
-            return Stream.concat(
-                    Stream.of(new TryCatchBlockNode(block.start, b.end, block.handler, block.type)),
-                    // Recurtion matters. What if some idiot writes something like this:
-                    /*
-                     * try {
-                     *     throw new Exception();
-                     * } catch (E0 e0) {
-                     *     throw new Exception();
-                     * } catch (E1 e1) {
-                     *     throw new Exception();
-                     * } finally {
-                     *     // ...
-                     * }
-                     */
-                    // That would be very stupid, bit Java allows it.
-                    //TODO It's not tested actually, maybe I'm wrong.
-                    splitTryCatchBlockNode(new TryCatchBlockNode(b.end, block.end, block.handler, block.type))
-            );
-        }).orElse(Stream.of(block));
+                //TODO I need a good comment about why there cannot be two blocks that satisfy the condition.
+                // Seems arbitrary, you know.
+                .findAny()
+                .map(b -> concat(
+                        Stream.of(new TryCatchBlockNode(block.start, b.end, block.handler, block.type)),
+                        //TODO Check if I need a recursion here. It depends on the exception variable index in catch
+                        // blocks that belong to the same try. It's probably the same for all of them, but who knows.
+                        Stream.of(new TryCatchBlockNode(b.end, block.end, block.handler, block.type))
+                )).orElse(
+                        Stream.of(block)
+                );
     }
 
     static class Try {
@@ -289,13 +277,13 @@ class FinallyMethodNode extends MethodNode {
 //        }
 
         var blocksGroupedByHandler = tryCatchBlocks.stream()
-                .filter(not(FinallyMethodNode::skipBlock))
-                .filter(not(Util::defaultFinallyBlock))
+                .filter(Util::validBlock)
+                .filter(Util::regularCatch)
                 .collect(Collectors.groupingBy(block -> block.handler));
 
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
-                .filter(not(FinallyMethodNode::skipBlock))
-                .filter(Util::defaultFinallyBlock)
+                .filter(Util::validBlock)
+                .filter(Util::defaultCatch)
                 .flatMap(this::splitTryCatchBlockNode)
                 .collect(Collectors.groupingBy(block -> block.handler));
 
@@ -389,7 +377,7 @@ class FinallyMethodNode extends MethodNode {
         }
 
 //        // catchBlocksMap now has all try-catch blocks without finally. They are irrelevant.
-//        // Or are they? What if there's a try-finally inside of catch block? That would be bad.
+//        // Or are they? What if there's a try-finally inside of catch block? That would be bad. Or would it?
 //        for (Map.Entry<List<Block>, List<CatchBlockX>> e : catchBlocksMap.entrySet()) {
 //            System.out.println("  Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
 //            for (Block tryBlock : e.getKey()) {
@@ -506,7 +494,7 @@ class FinallyMethodNode extends MethodNode {
             if (returnType == ';') {
                 switch (methodInstruction.name) {
                     case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
-                        super.instructions.insert(node, optionalOfNullable());
+                        super.instructions.insert(node, Util.optionalOfNullable());
 
                     //noinspection fallthrough
                     case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
@@ -525,11 +513,11 @@ class FinallyMethodNode extends MethodNode {
             } else { // method returns primitive type
                 switch (methodInstruction.name) {
                     case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
-                        super.instructions.insert(node, optionalOf());
+                        super.instructions.insert(node, Util.optionalOf());
 
                     //noinspection fallthrough
                     case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
-                        super.instructions.insert(node, valueOf(returnType));
+                        super.instructions.insert(node, Util.valueOf(returnType));
                         break;
 
                     default:
@@ -551,26 +539,6 @@ class FinallyMethodNode extends MethodNode {
             }
         }
         return node;
-    }
-
-    private MethodInsnNode optionalOfNullable() {
-        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
-                "ofNullable", "(Ljava/lang/Object;)Ljava/util/Optional;", false);
-    }
-
-    private MethodInsnNode valueOf(char returnTypeDescriptor) {
-        return new MethodInsnNode(INVOKESTATIC, toBoxedInternalName(returnTypeDescriptor),
-                "valueOf", getMethodDescriptorForValueOf(returnTypeDescriptor),false);
-    }
-
-    private MethodInsnNode optionalOf() {
-        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
-                "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
-    }
-
-    private static boolean skipBlock(TryCatchBlockNode block) {
-        // Nasty bug in compiler?
-        return block.start == block.handler;
     }
 
     private AbstractInsnNode replaceInstruction(AbstractInsnNode from, AbstractInsnNode to) {
@@ -624,7 +592,7 @@ class FinallyMethodNode extends MethodNode {
         RETURN, THROW, NOOP
     }
 
-    private void initLabelsCache() {
+    private void readLabels() {
         for (AbstractInsnNode node = super.instructions.getFirst(); node != null; node = node.getNext()) {
             if (node.getType() == AbstractInsnNode.LABEL) {
                 labelsMap.put((LabelNode) node, labelsMap.size());

@@ -27,7 +27,6 @@ public class VoidReturnTest {
     void middleFinallyBlockInTry() {
         try {
             if (System.currentTimeMillis() != 0) return;
-            System.currentTimeMillis(); // to avoid warnings
         } finally {
             assertFalse(Finally.hasReturnValue());
             assertEquals(Optional.empty(), Finally.getReturnValueOptional());

@@ -40,9 +40,13 @@ class ComplexReturnTest {
     void conditionInCatchBlock() {
         assertEquals("false", conditionInCatchBlock0(false));
         assertEquals("false", conditionInCatchBlock1(false));
+        assertEquals("false", conditionInCatchBlock2(false));
+        assertEquals("false", conditionInCatchBlock3(false));
 
         assertEquals("true", conditionInCatchBlock0(true));
         assertEquals("true", conditionInCatchBlock1(true));
+        assertEquals("true", conditionInCatchBlock2(true));
+        assertEquals("true", conditionInCatchBlock3(true));
     }
 
     private static String conditionInTryBlock0(boolean hasReturnValue) {
@@ -104,6 +108,50 @@ class ComplexReturnTest {
     private static String conditionInCatchBlock1(boolean hasReturnValue) {
         try {
             throw new Exception();
+        } catch (Exception e) {
+            if (hasReturnValue) {
+                return "true";
+            }
+
+            return "false";
+        } finally {
+            assertTrue(Finally.hasReturnValue());
+
+            if (hasReturnValue) {
+                assertEquals("true", Finally.getReturnValue());
+            } else {
+                assertEquals("false", Finally.getReturnValue());
+            }
+        }
+    }
+
+    private static String conditionInCatchBlock2(boolean hasReturnValue) {
+        try {
+            throw new Exception();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            if (hasReturnValue) {
+                return "true";
+            }
+        } finally {
+            assertEquals(hasReturnValue, Finally.hasReturnValue());
+
+            if (hasReturnValue) {
+                assertEquals("true", Finally.getReturnValue());
+            } else {
+                assertEquals(Optional.empty(), Finally.getReturnValueOptional());
+            }
+        }
+
+        return "false";
+    }
+
+    private static String conditionInCatchBlock3(boolean hasReturnValue) {
+        try {
+            throw new Exception();
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             if (hasReturnValue) {
                 return "true";

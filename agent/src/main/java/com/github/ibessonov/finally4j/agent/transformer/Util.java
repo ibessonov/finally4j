@@ -17,6 +17,7 @@ package com.github.ibessonov.finally4j.agent.transformer;
 
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 
 import static org.objectweb.asm.Opcodes.ALOAD;
@@ -26,6 +27,7 @@ import static org.objectweb.asm.Opcodes.ATHROW;
 import static org.objectweb.asm.Opcodes.DLOAD;
 import static org.objectweb.asm.Opcodes.FLOAD;
 import static org.objectweb.asm.Opcodes.ILOAD;
+import static org.objectweb.asm.Opcodes.INVOKESTATIC;
 import static org.objectweb.asm.Opcodes.IRETURN;
 import static org.objectweb.asm.Opcodes.ISTORE;
 import static org.objectweb.asm.Opcodes.LLOAD;
@@ -86,8 +88,11 @@ class Util {
         return opcode == ATHROW;
     }
 
-    static boolean defaultFinallyBlock(TryCatchBlockNode block) {
-        // Default finally block has "null" throwable type instead of "Throwable".
+    static boolean regularCatch(TryCatchBlockNode block) {
+        return block.type != null;
+    }
+
+    static boolean defaultCatch(TryCatchBlockNode block) {
         return block.type == null;
     }
 
@@ -139,5 +144,25 @@ class Util {
 
     private static IllegalArgumentException illegalType(char type) {
         return new IllegalArgumentException(Character.toString(type));
+    }
+
+    static MethodInsnNode optionalOfNullable() {
+        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
+                "ofNullable", "(Ljava/lang/Object;)Ljava/util/Optional;", false);
+    }
+
+    static MethodInsnNode valueOf(char returnTypeDescriptor) {
+        return new MethodInsnNode(INVOKESTATIC, toBoxedInternalName(returnTypeDescriptor),
+                "valueOf", getMethodDescriptorForValueOf(returnTypeDescriptor),false);
+    }
+
+    static MethodInsnNode optionalOf() {
+        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
+                "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
+    }
+
+    static boolean validBlock(TryCatchBlockNode block) {
+        // Nasty bug in compiler?
+        return block.start != block.handler;
     }
 }
