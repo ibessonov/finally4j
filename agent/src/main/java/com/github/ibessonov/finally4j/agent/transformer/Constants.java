@@ -27,4 +27,5 @@ interface Constants {
 
     String FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME = "hasThrownException";
     String FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME = "getThrownException";
+    String FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME = "getThrownExceptionOptional";
 }

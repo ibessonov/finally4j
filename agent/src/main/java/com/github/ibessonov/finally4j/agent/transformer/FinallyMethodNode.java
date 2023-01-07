@@ -185,6 +185,40 @@ class FinallyMethodNode extends MethodNode {
                     }
                 }
             });
+
+            // Now exceptions.
+            IntStream.range(0, aTry.catchScopes.size()).forEach(i -> {
+                Scope catchScope = aTry.catchScopes.get(i);
+
+                Block lastBlock = catchScope.last();
+
+                LabelNode startLabel = lastBlock.end;
+
+                LabelNode endLabel = i == aTry.catchScopes.size() - 1
+                        ? aTry.finallyScope.first().start
+                        : aTry.catchScopes.get(i + 1).first().start;
+
+                if (isStore(findPreviousInstruction(lastBlock.end))) {
+                    LabelNode theEndOfFinally = findTheEndOfFinally(lastBlock.end, false);
+
+                    if (theEndOfFinally == endLabel) {
+                        return;
+                    } else {
+                        startLabel = theEndOfFinally;
+                    }
+                }
+
+                AbstractInsnNode firstCatchInstruction = findNextInstruction(catchScope.first().start);
+
+                assert isStore(firstCatchInstruction);
+
+                var storeInstruction = (VarInsnNode) firstCatchInstruction;
+                Block finallyBlock = new Block(startLabel, endLabel);
+
+                replaceExceptionInstructions(storeInstruction, finallyBlock);
+            });
+
+            replaceExceptionInstructions(((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start)), aTry.finallyScope.first());
         }
 
         if (DEBUG) {
@@ -192,6 +226,34 @@ class FinallyMethodNode extends MethodNode {
         }
 
         super.accept(outerMv);
+    }
+
+    private void replaceExceptionInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
+        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
+            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
+                assert node instanceof MethodInsnNode;
+
+                MethodInsnNode methodInstruction = (MethodInsnNode) node;
+                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
+                    switch (methodInstruction.name) {
+                        case Constants.FINALLY_HAS_RETURN_VALUE_METHOD_NAME: {
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
+                            break;
+                        }
+                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME: {
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
+                            break;
+                        }
+                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
+
+                        //noinspection fallthrough
+                        case Constants.FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME:
+                            super.instructions.insert(node, Util.optionalOfNullable());
+                    }
+                }
+            }
+        }
     }
 
     private Stream<TryCatchBlockNode> splitTryCatchBlockNode(TryCatchBlockNode block) {
