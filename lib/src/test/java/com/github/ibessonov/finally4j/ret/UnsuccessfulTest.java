@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Ivan Bessonov
+ * Copyright 2023 Ivan Bessonov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ package com.github.ibessonov.finally4j.ret;
 import com.github.ibessonov.finally4j.Finally;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author ibessonov
