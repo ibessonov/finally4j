@@ -28,16 +28,15 @@ import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -55,6 +54,8 @@ import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
 import static java.util.Comparator.comparingInt;
+import static java.util.stream.Collectors.groupingBy;
+import static java.util.stream.Collectors.mapping;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Stream.concat;
 import static org.objectweb.asm.Opcodes.ATHROW;
@@ -88,11 +89,6 @@ class FinallyMethodNode extends MethodNode {
      */
     private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
 
-    /**
-     * Array of all labels according to their sequence numbers. Matches {@link #labelsMap}.
-     */
-    private LabelNode[] labels = null;
-
     FinallyMethodNode(MethodVisitor outerMv, Runnable methodTransformedClosure,
                       int access, String name, String desc, String signature, String[] exceptions) {
         super(ASM_V, access, name, desc, signature, exceptions);
@@ -104,8 +100,9 @@ class FinallyMethodNode extends MethodNode {
     public void visitEnd() {
         initLabels();
 
-        List<Try> tryList = inferTheStructure();
+        List<Try> tryList = initTryList();
 
+        // Avoid logs and return if there are no finally blocks in the method.
         if (tryList.isEmpty()) {
             super.accept(outerMv);
 
@@ -333,46 +330,40 @@ class FinallyMethodNode extends MethodNode {
         }
     }
 
-    private List<Try> inferTheStructure() {
-//        for (TryCatchBlockNode block : super.tryCatchBlocks) {
-//            System.out.println("try-catch-block: " + getLabelIndex(block.start) + " " + getLabelIndex(block.end) + " " + getLabelIndex(block.handler) + " (" + block.type + ")");
-//
-//            if (skipBlock(block)/* || getLabelIndex(block.end) > getLabelIndex(block.handler)*/) {
-//                AbstractInsnNode instruction = findPreviousInstruction(findNextLabel(block.end));
-//
-//                System.out.println("Handler opcode = " + instruction.getOpcode());
-//            }
-//        }
-
+    private List<Try> initTryList() {
+        // All "TryCatchBlockNode" instances, that represent catch blocks, grouped by handler labels.
         var blocksGroupedByHandler = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::regularCatch)
-                .collect(Collectors.groupingBy(block -> block.handler));
+                .collect(groupingBy(block -> block.handler));
 
-        var mergedTryCatchBlocks = mergedTryCatchBlocks();
+        // List of all "TryCatchBlockNode" instances, for which the end label of the block matches the handler label.
+        var mergedTryCatchBlocks = tryCatchBlocks.stream()
+                .filter(Util::validBlock)
+                .filter(Util::regularCatch)
+                .filter(b -> b.end == b.handler)
+                .collect(toList());
 
+        // All "TryCatchBlockNode" instances, that represent finally blocks, grouped by handler labels.
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::defaultCatch)
                 .flatMap(block -> splitTryCatchBlockNode(mergedTryCatchBlocks, block))
-                .collect(Collectors.groupingBy(block -> block.handler));
+                .collect(groupingBy(block -> block.handler));
 
+        // Sort values in "blocksGroupedByHandler" and "blocksGroupedByDefaultHandler" to simplify matching them.
         concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
                 .forEach(list -> list.sort(comparingInt(node -> getLabelIndex(node.start))));
 
-        Map<List<Block>, List<LabelNode>> catchBlocksMap = new HashMap<>();
-        for (Map.Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByHandler.entrySet()) {
-            List<TryCatchBlockNode> list = entry.getValue();
-
-            List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
-
-            catchBlocksMap.computeIfAbsent(blocks, b -> new ArrayList<>())
-                    .add(entry.getKey());
-        }
+        // Maps "try" sections to lists of corresponding "catch" sections. Without finally blocks.
+        var catchBlocksMap = blocksGroupedByHandler.entrySet().stream().collect(
+                groupingBy(entry -> entry.getValue().stream().map(Block::new).collect(toList()),
+                mapping(Entry::getKey, toList()))
+        );
 
         List<Try> tempTryList = new ArrayList<>();
 
-        for (Map.Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByDefaultHandler.entrySet()) {
+        for (Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByDefaultHandler.entrySet()) {
             List<TryCatchBlockNode> list = entry.getValue();
 
             List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
@@ -381,7 +372,7 @@ class FinallyMethodNode extends MethodNode {
 
             boolean found = false;
 
-            for (Map.Entry<List<Block>, List<LabelNode>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
+            for (Entry<List<Block>, List<LabelNode>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
                 List<Block> prefix = catchBlocksMapEntry.getKey();
 
                 if (startsWith(blocks, prefix)) {
@@ -486,9 +477,10 @@ class FinallyMethodNode extends MethodNode {
         AbstractInsnNode instruction = defaultBlock
                 ? findNextInstruction(startLabel)
                 : findPreviousInstruction(startLabel);
-        assert isStore(instruction) : "No store instruction at the beginning of default finally block.";
 
-        var store = (VarInsnNode) instruction;
+        assert isStore(instruction);
+
+        var storeInstruction = (VarInsnNode) instruction;
 
         Set<LabelNode> jumpLabels = new HashSet<>();
 
@@ -518,8 +510,7 @@ class FinallyMethodNode extends MethodNode {
                 continue;
             }
 
-            //noinspection DataFlowIssue
-            if (isLoad(instruction) && ((VarInsnNode) instruction).var == store.var) {
+            if (isLoad(instruction) && ((VarInsnNode) instruction).var == storeInstruction.var) {
                 // Throw found.
                 return findNextLabel(instruction);
             }
@@ -615,6 +606,10 @@ class FinallyMethodNode extends MethodNode {
             this.end = end;
         }
 
+        Block(TryCatchBlockNode node) {
+            this(node.start, node.end);
+        }
+
         int startIndex() {
             return getLabelIndex(start);
         }
@@ -648,32 +643,13 @@ class FinallyMethodNode extends MethodNode {
         RETURN, THROW, NOOP
     }
 
-    private void initLabels() {
-        for (AbstractInsnNode node = super.instructions.getFirst(); node != null; node = node.getNext()) {
-            if (node.getType() == AbstractInsnNode.LABEL) {
-                labelsMap.put((LabelNode) node, labelsMap.size());
-            }
-        }
-
-        labels = new LabelNode[labelsMap.size()];
-        for (Map.Entry<LabelNode, Integer> entry : labelsMap.entrySet()) {
-            labels[entry.getValue()] = entry.getKey();
-        }
-    }
-
     /**
-     * Returns a list of all {@link TryCatchBlockNode}, for which the end label of the block matches the handler label.
+     * Initializes {@link #labelsMap} and {@link #labels}, by scanning through {@link #instructions}
      */
-    private List<TryCatchBlockNode> mergedTryCatchBlocks() {
-        return tryCatchBlocks.stream()
-                .filter(Util::validBlock)
-                .filter(Util::regularCatch)
-                .filter(b -> b.end == b.handler)
-                .collect(toList());
-    }
-
-    private LabelNode getLabel(int index) {
-        return labels[index];
+    private void initLabels() {
+        Stream.iterate(super.instructions.getFirst(), Objects::nonNull, AbstractInsnNode::getNext)
+                .filter(node -> node.getType() == AbstractInsnNode.LABEL)
+                .forEach(node -> labelsMap.put((LabelNode) node, labelsMap.size()));
     }
 
     private int getLabelIndex(LabelNode label) {
