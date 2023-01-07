@@ -35,6 +35,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -54,7 +55,6 @@ import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
 import static java.util.Comparator.comparingInt;
-import static java.util.stream.Collectors.toCollection;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Stream.concat;
 import static org.objectweb.asm.Opcodes.ATHROW;
@@ -73,31 +73,36 @@ import static org.objectweb.asm.tree.AbstractInsnNode.METHOD_INSN;
  * @author ibessonov
  */
 class FinallyMethodNode extends MethodNode {
+    /**
+     * Closure that must be invoked when the method is transformed by this class. Used to notify external class visitor.
+     */
+    private final Runnable methodTransformedClosure;
 
-    private final Runnable methodChanged;
+    /**
+     * Delegate method visitor to generate bytecode.
+     */
     private final MethodVisitor outerMv;
 
+    /**
+     * Mapping of all labels into their sequence number.
+     */
     private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
+
+    /**
+     * Array of all labels according to their sequence numbers. Matches {@link #labelsMap}.
+     */
     private LabelNode[] labels = null;
 
-    private List<TryCatchBlockNode> mergedTryCatchBlocks = new ArrayList<>();
-
-    FinallyMethodNode(Runnable methodChanged, MethodVisitor outerMv,
+    FinallyMethodNode(MethodVisitor outerMv, Runnable methodTransformedClosure,
                       int access, String name, String desc, String signature, String[] exceptions) {
         super(ASM_V, access, name, desc, signature, exceptions);
-        this.methodChanged = methodChanged;
         this.outerMv       = outerMv;
+        this.methodTransformedClosure = methodTransformedClosure;
     }
 
     @Override
     public void visitEnd() {
-        readLabels();
-
-        tryCatchBlocks.stream()
-                .filter(Util::validBlock)
-                .filter(Util::regularCatch)
-                .filter(b -> b.end == b.handler)
-                .collect(toCollection(() -> mergedTryCatchBlocks));
+        initLabels();
 
         List<Try> tryList = inferTheStructure();
 
@@ -218,10 +223,11 @@ class FinallyMethodNode extends MethodNode {
                 replaceExceptionInstructions(storeInstruction, finallyBlock);
             });
 
-            replaceExceptionInstructions(((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start)), aTry.finallyScope.first());
+            replaceExceptionInstructions((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start), aTry.finallyScope.first());
         }
 
         if (DEBUG) {
+            // Don't remove it, it's an actual empty line, not a mistake.
             System.out.println();
         }
 
@@ -256,7 +262,7 @@ class FinallyMethodNode extends MethodNode {
         }
     }
 
-    private Stream<TryCatchBlockNode> splitTryCatchBlockNode(TryCatchBlockNode block) {
+    private Stream<TryCatchBlockNode> splitTryCatchBlockNode(List<TryCatchBlockNode> mergedTryCatchBlocks, TryCatchBlockNode block) {
         return mergedTryCatchBlocks.stream()
                 .filter(b -> b.start == block.start && getLabelIndex(b.end) < getLabelIndex(block.end))
                 //TODO I need a good comment about why there cannot be two blocks that satisfy the condition.
@@ -343,33 +349,25 @@ class FinallyMethodNode extends MethodNode {
                 .filter(Util::regularCatch)
                 .collect(Collectors.groupingBy(block -> block.handler));
 
+        var mergedTryCatchBlocks = mergedTryCatchBlocks();
+
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::defaultCatch)
-                .flatMap(this::splitTryCatchBlockNode)
+                .flatMap(block -> splitTryCatchBlockNode(mergedTryCatchBlocks, block))
                 .collect(Collectors.groupingBy(block -> block.handler));
 
         concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
                 .forEach(list -> list.sort(comparingInt(node -> getLabelIndex(node.start))));
 
-        class CatchBlockX {
-            final String type;
-            final LabelNode start;
-
-            CatchBlockX(String type, LabelNode start) {
-                this.type = type;
-                this.start = start;
-            }
-        }
-
-        Map<List<Block>, List<CatchBlockX>> catchBlocksMap = new HashMap<>();
+        Map<List<Block>, List<LabelNode>> catchBlocksMap = new HashMap<>();
         for (Map.Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByHandler.entrySet()) {
             List<TryCatchBlockNode> list = entry.getValue();
 
             List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
 
             catchBlocksMap.computeIfAbsent(blocks, b -> new ArrayList<>())
-                    .add(new CatchBlockX(list.get(0).type, entry.getKey()));
+                    .add(entry.getKey());
         }
 
         List<Try> tempTryList = new ArrayList<>();
@@ -383,12 +381,12 @@ class FinallyMethodNode extends MethodNode {
 
             boolean found = false;
 
-            for (Map.Entry<List<Block>, List<CatchBlockX>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
+            for (Map.Entry<List<Block>, List<LabelNode>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
                 List<Block> prefix = catchBlocksMapEntry.getKey();
 
                 if (startsWith(blocks, prefix)) {
-                    List<CatchBlockX> value = catchBlocksMapEntry.getValue();
-                    value.sort(comparingInt(cb -> getLabelIndex(cb.start)));
+                    List<LabelNode> value = catchBlocksMapEntry.getValue();
+                    value.sort(comparingInt(this::getLabelIndex));
 
                     Try newTry = new Try();
 
@@ -396,14 +394,14 @@ class FinallyMethodNode extends MethodNode {
 
                     List<Block> allCatchSegments = blocks.subList(prefix.size(), blocks.size());
 
-                    assert value.get(0).start == allCatchSegments.get(0).start;
-                    Iterator<CatchBlockX> valueIterator = value.iterator();
+                    assert value.get(0) == allCatchSegments.get(0).start;
+                    Iterator<LabelNode> valueIterator = value.iterator();
                     valueIterator.next();
 
-                    CatchBlockX nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
+                    LabelNode nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
                     Scope cur = new Scope();
                     for (Block smallCatchSegment : allCatchSegments) {
-                        if (nextCatch != null && smallCatchSegment.start == nextCatch.start) {
+                        if (smallCatchSegment.start == nextCatch) {
                             newTry.catchScopes.add(cur);
 
                             nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
@@ -440,7 +438,7 @@ class FinallyMethodNode extends MethodNode {
 
 //        // catchBlocksMap now has all try-catch blocks without finally. They are irrelevant.
 //        // Or are they? What if there's a try-finally inside of catch block? That would be bad. Or would it?
-//        for (Map.Entry<List<Block>, List<CatchBlockX>> e : catchBlocksMap.entrySet()) {
+//        for (Map.Entry<List<Block>, List<LabelNode>> e : catchBlocksMap.entrySet()) {
 //            System.out.println("  Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
 //            for (Block tryBlock : e.getKey()) {
 //                AbstractInsnNode nextInstruction = findNextInstruction(tryBlock.end);
@@ -450,42 +448,38 @@ class FinallyMethodNode extends MethodNode {
 //            }
 //        }
 
-        tempTryList.sort(comparingInt((Try t) -> t.finallyScope.blocks.get(0).endIndex() - t.tryScope.blocks.get(0).startIndex())
+        tempTryList.sort(
+                comparingInt((Try t) -> t.finallyScope.blocks.get(0).endIndex() - t.tryScope.blocks.get(0).startIndex())
                 .thenComparingInt(t -> t.tryScope.blocks.get(0).startIndex())
         );
 
-        List<Try> tryList = new ArrayList<>();
+        return IntStream.range(0, tempTryList.size()).mapToObj(i -> {
+            Try first = tempTryList.get(i);
 
-        tempTryListLoop:
-        while (!tempTryList.isEmpty()) {
-            Try first = tempTryList.remove(0);
-
-            for (Try nextTry : tempTryList) {
+            for (Try nextTry : tempTryList.subList(i + 1, tempTryList.size())) {
                 if (nextTry.tryScope.surrounds(first)) {
                     nextTry.tryScope.nested.add(first);
 
-                    continue tempTryListLoop;
+                    return Optional.<Try>empty();
                 }
 
                 for (Scope catchScope : nextTry.catchScopes) {
                     if (catchScope.surrounds(first)) {
                         catchScope.nested.add(first);
 
-                        continue tempTryListLoop;
+                        return Optional.<Try>empty();
                     }
                 }
 
                 if (nextTry.finallyScope.surrounds(first)) {
                     nextTry.finallyScope.nested.add(first);
 
-                    continue tempTryListLoop;
+                    return Optional.<Try>empty();
                 }
             }
 
-            tryList.add(first);
-        }
-
-        return tryList;
+            return Optional.of(first);
+        }).flatMap(Optional::stream).collect(toList());
     }
 
     private LabelNode findTheEndOfFinally(LabelNode startLabel, boolean defaultBlock) {
@@ -607,7 +601,7 @@ class FinallyMethodNode extends MethodNode {
         super.instructions.insertBefore(from, to);
         super.instructions.remove(from);
 
-        methodChanged.run();
+        methodTransformedClosure.run();
 
         return to;
     }
@@ -654,7 +648,7 @@ class FinallyMethodNode extends MethodNode {
         RETURN, THROW, NOOP
     }
 
-    private void readLabels() {
+    private void initLabels() {
         for (AbstractInsnNode node = super.instructions.getFirst(); node != null; node = node.getNext()) {
             if (node.getType() == AbstractInsnNode.LABEL) {
                 labelsMap.put((LabelNode) node, labelsMap.size());
@@ -665,6 +659,17 @@ class FinallyMethodNode extends MethodNode {
         for (Map.Entry<LabelNode, Integer> entry : labelsMap.entrySet()) {
             labels[entry.getValue()] = entry.getKey();
         }
+    }
+
+    /**
+     * Returns a list of all {@link TryCatchBlockNode}, for which the end label of the block matches the handler label.
+     */
+    private List<TryCatchBlockNode> mergedTryCatchBlocks() {
+        return tryCatchBlocks.stream()
+                .filter(Util::validBlock)
+                .filter(Util::regularCatch)
+                .filter(b -> b.end == b.handler)
+                .collect(toList());
     }
 
     private LabelNode getLabel(int index) {

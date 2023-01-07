@@ -23,6 +23,6 @@ class FinallyClassVisitor extends ClassVisitor {
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
         MethodVisitor outerMv = super.visitMethod(access, name, desc, signature, exceptions);
 
-        return new FinallyMethodNode(callback, outerMv, access, name, desc, signature, exceptions);
+        return new FinallyMethodNode(outerMv, callback, access, name, desc, signature, exceptions);
     }
 }
