@@ -247,12 +247,12 @@ class FinallyMethodNode extends MethodNode {
                             node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
                             break;
                         }
-                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
-
-                        //noinspection fallthrough
                         case Constants.FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME:
                             super.instructions.insert(node, Util.optionalOfNullable());
+
+                        //noinspection fallthrough
+                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
                     }
                 }
             }

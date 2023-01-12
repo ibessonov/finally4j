@@ -18,7 +18,11 @@ package com.github.ibessonov.finally4j.ex;
 import com.github.ibessonov.finally4j.Finally;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -35,6 +39,13 @@ class SuccessfulTest {
                 }
             } finally {
                 assertTrue(Finally.hasThrownException());
+
+                Throwable e = Finally.getThrownException();
+
+                assertNotNull(e);
+                assertEquals(Exception.class, e.getClass());
+
+                assertEquals(Optional.of(e), Finally.getThrownExceptionOptional());
             }
         } catch (Exception ignored) {
         }

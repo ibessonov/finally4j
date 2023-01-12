@@ -63,7 +63,7 @@ public class FinallyClassFileTransformer implements ClassFileTransformer {
             cr.accept(cv, 0);
         } catch (Throwable t) {
             if (DEBUG) {
-                t.printStackTrace();
+                t.printStackTrace(System.err);
             }
 
             throw t;
