@@ -174,7 +174,7 @@ class FinallyMethodNode extends MethodNode {
                 }
                 AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
                 //TODO Not the best way to find "return" finally blocks.
-                // May be false-positive if there's a simple assignment at the end, or unconditional throw like in "com.github.ibessonov.finally4j.ex.SuccessfulTest.throwInTryUnconditional".
+                // May be false-positive if there's a simple assignment at the end.
                 // One way to avoid that would be checking the end of "finally" block for corresponding "load" instruction.
                 // But, it only works when the finally block itself doesn't have a return or throw at the end, that is
                 // the worst case scenario. There's no way to tell the difference then. I guess I just document it and that's it.
@@ -258,23 +258,27 @@ class FinallyMethodNode extends MethodNode {
     }
 
     private List<Try> initTryList() {
+        // For some reason, there might be an intersection between start/end scope and the handler.
+        // Here I normalize such blocks by moving end to the handler position.
+        List<TryCatchBlockNode> tryCatchBlocks = this.tryCatchBlocks.stream()
+                .filter(Util::validBlock)
+                .map(b -> labelIdx.get(b.end) <= labelIdx.get(b.handler) ? b
+                        : new TryCatchBlockNode(b.start, b.handler, b.handler, b.type)
+                ).collect(toList());
+
         // All "TryCatchBlockNode" instances that represent catch blocks, grouped by handler labels.
         var blocksGroupedByHandler = tryCatchBlocks.stream()
-                .filter(Util::validBlock)
                 .filter(Util::regularCatch)
                 .collect(groupingBy(block -> block.handler));
 
         // List of all "TryCatchBlockNode" instances, for which the end label of the block matches the handler label.
         var mergedTryCatchBlocks = tryCatchBlocks.stream()
-                .filter(Util::validBlock)
                 .filter(Util::regularCatch)
-                .filter(b -> labelIdx.get(b.end) >= labelIdx.get(b.handler))
-                .map(b -> b.end == b.handler ? b : new TryCatchBlockNode(b.start, b.handler, b.handler, b.type)) // ???
+                .filter(b -> b.end == b.handler)
                 .collect(toList());
 
         // All "TryCatchBlockNode" instances that represent finally blocks, grouped by handler labels.
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
-                .filter(Util::validBlock)
                 .filter(Util::defaultCatch)
                 .flatMap(block -> splitTryCatchBlockNode(mergedTryCatchBlocks, block))
                 .collect(groupingBy(block -> block.handler));
