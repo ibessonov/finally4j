@@ -92,7 +92,7 @@ class FinallyMethodNode extends MethodNode {
     FinallyMethodNode(MethodVisitor outerMv, Runnable methodTransformedClosure,
                       int access, String name, String desc, String signature, String[] exceptions) {
         super(ASM_V, access, name, desc, signature, exceptions);
-        this.outerMv       = outerMv;
+        this.outerMv = outerMv;
         this.methodTransformedClosure = methodTransformedClosure;
     }
 
@@ -100,8 +100,8 @@ class FinallyMethodNode extends MethodNode {
     public void visitEnd() {
         // Calculate indexes for all labels in the method.
         Stream.iterate(super.instructions.getFirst(), Objects::nonNull, AbstractInsnNode::getNext)
-                .filter(node1 -> node1.getType() == AbstractInsnNode.LABEL)
-                .forEach(node1 -> labelIdx.put((LabelNode) node1, labelIdx.size()));
+                .filter(node -> node.getType() == AbstractInsnNode.LABEL)
+                .forEach(node -> labelIdx.put((LabelNode) node, labelIdx.size()));
 
         List<Try> tryList = initTryList();
 
@@ -114,6 +114,18 @@ class FinallyMethodNode extends MethodNode {
 
         if (DEBUG) {
             System.out.println("  Transforming method '" + super.name + super.desc + "':");
+
+            for (TryCatchBlockNode node : tryCatchBlocks) {
+                System.out.println("    raw block: [s=" + labelIdx.get(node.start) + ", e=" + labelIdx.get(node.end) + ", h=" + labelIdx.get(node.handler) + ", t=" + node.type + "]");
+            }
+            System.out.println("   ---");
+
+            var invalidBlocks = tryCatchBlocks.stream()
+                    .filter(block -> !Util.validBlock(block)).map(block -> new Block(this, block).toString())
+                    .collect(toList());
+            if (!invalidBlocks.isEmpty()) {
+                System.out.println("    Invalid blocks: " + invalidBlocks);
+            }
 
             tryList.forEach(aTry -> aTry.print("    "));
         }
@@ -162,34 +174,14 @@ class FinallyMethodNode extends MethodNode {
                 }
                 AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
                 //TODO Not the best way to find "return" finally blocks.
-                // May be false-positive if there's a simple assignment at the end.
+                // May be false-positive if there's a simple assignment at the end, or unconditional throw like in "com.github.ibessonov.finally4j.ex.SuccessfulTest.throwInTryUnconditional".
                 // One way to avoid that would be checking the end of "finally" block for corresponding "load" instruction.
                 // But, it only works when the finally block itself doesn't have a return or throw at the end, that is
                 // the worst case scenario. There's no way to tell the difference then. I guess I just document it and that's it.
                 if (isStore(previousInstruction)) {
                     VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
 
-                    for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
-                        if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
-                            assert node instanceof MethodInsnNode;
-
-                            MethodInsnNode methodInstruction = (MethodInsnNode) node;
-                            if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
-                                switch (methodInstruction.name) {
-                                    case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME: {
-                                        node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
-                                        break;
-                                    }
-                                    case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME: {
-                                        node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
-                                        break;
-                                    }
-                                    default:
-                                        node = processFinallyMethodWithReturn(methodInstruction, storeInstruction.var);
-                                }
-                            }
-                        }
-                    }
+                    replaceReturnedValueInstructions(storeInstruction, finallyBlock);
                 }
             });
 
@@ -236,37 +228,22 @@ class FinallyMethodNode extends MethodNode {
         super.accept(outerMv);
     }
 
-    private void replaceExceptionInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
-        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
-            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
-                assert node instanceof MethodInsnNode;
-
-                MethodInsnNode methodInstruction = (MethodInsnNode) node;
-                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
-                    switch (methodInstruction.name) {
-                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME: {
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
-                            break;
-                        }
-                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME: {
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
-                            break;
-                        }
-                        case Constants.FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME:
-                            super.instructions.insert(node, Util.optionalOfNullable());
-
-                        //noinspection fallthrough
-                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
-                    }
-                }
-            }
-        }
-    }
-
+    /**
+     * Splits "merged" default catch blocks apart. For example, in this case: <pre>
+     * try {
+     *     throw new Exception();
+     * } catch (Exception e) {
+     *     foo();
+     * } finally {
+     *     bar();
+     * }
+     * </pre>
+     * the block for {@code finally} handler would include both {@code try} and {@code catch} sections, but we want to
+     * process them separately.
+     */
     private Stream<TryCatchBlockNode> splitTryCatchBlockNode(List<TryCatchBlockNode> mergedTryCatchBlocks, TryCatchBlockNode block) {
         return mergedTryCatchBlocks.stream()
-                .filter(b -> b.start == block.start && (int) labelIdx.get(b.end) < labelIdx.get(block.end))
+                .filter(b -> b.start == block.start && labelIdx.get(b.end) < labelIdx.get(block.end))
                 //TODO I need a good comment about why there cannot be two blocks that satisfy the condition.
                 // Seems arbitrary, you know.
                 .findAny()
@@ -281,7 +258,7 @@ class FinallyMethodNode extends MethodNode {
     }
 
     private List<Try> initTryList() {
-        // All "TryCatchBlockNode" instances, that represent catch blocks, grouped by handler labels.
+        // All "TryCatchBlockNode" instances that represent catch blocks, grouped by handler labels.
         var blocksGroupedByHandler = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::regularCatch)
@@ -291,10 +268,11 @@ class FinallyMethodNode extends MethodNode {
         var mergedTryCatchBlocks = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::regularCatch)
-                .filter(b -> b.end == b.handler)
+                .filter(b -> labelIdx.get(b.end) >= labelIdx.get(b.handler))
+                .map(b -> b.end == b.handler ? b : new TryCatchBlockNode(b.start, b.handler, b.handler, b.type)) // ???
                 .collect(toList());
 
-        // All "TryCatchBlockNode" instances, that represent finally blocks, grouped by handler labels.
+        // All "TryCatchBlockNode" instances that represent finally blocks, grouped by handler labels.
         var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
                 .filter(Util::validBlock)
                 .filter(Util::defaultCatch)
@@ -390,8 +368,8 @@ class FinallyMethodNode extends MethodNode {
 //        }
 
         tempTryList.sort(
-                comparingInt((Try t) -> t.finallyScope.blocks.get(0).endIndex() - t.tryScope.blocks.get(0).startIndex())
-                .thenComparingInt(t -> t.tryScope.blocks.get(0).startIndex())
+                comparingInt((Try t) -> t.finallyScope.first().endIndex() - t.tryScope.first().startIndex())
+                .thenComparingInt(t -> t.tryScope.first().startIndex())
         );
 
         return IntStream.range(0, tempTryList.size()).mapToObj(i -> {
@@ -473,6 +451,58 @@ class FinallyMethodNode extends MethodNode {
         }
     }
 
+    private void replaceReturnedValueInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
+        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
+            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
+                assert node instanceof MethodInsnNode;
+
+                MethodInsnNode methodInstruction = (MethodInsnNode) node;
+                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
+                    switch (methodInstruction.name) {
+                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
+                            break;
+
+                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
+                            break;
+
+                        default:
+                            node = replaceReturnedValueInstruction(methodInstruction, storeInstruction.var);
+                    }
+                }
+            }
+        }
+    }
+
+    private void replaceExceptionInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
+        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
+            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
+                assert node instanceof MethodInsnNode;
+
+                MethodInsnNode methodInstruction = (MethodInsnNode) node;
+                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
+                    switch (methodInstruction.name) {
+                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
+                            break;
+
+                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
+                            break;
+
+                        case Constants.FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME:
+                            super.instructions.insert(node, Util.optionalOfNullable());
+
+                            //noinspection fallthrough
+                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
+                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Replaces the {@code Finally.returnedValue*()} call with the actual returned value.
      *
@@ -480,7 +510,7 @@ class FinallyMethodNode extends MethodNode {
      * @param var Variable index of the return value.
      * @return New instruction node that replaced the invoke instruction, or the original instruction if nothing happened.
      */
-    private AbstractInsnNode processFinallyMethodWithReturn(MethodInsnNode methodInstruction, int var) {
+    private AbstractInsnNode replaceReturnedValueInstruction(MethodInsnNode methodInstruction, int var) {
         if (!methodInstruction.name.startsWith(Constants.FINALLY_GET_RETURNED_VALUE_METHOD_PREFIX)) {
             return methodInstruction;
         }
