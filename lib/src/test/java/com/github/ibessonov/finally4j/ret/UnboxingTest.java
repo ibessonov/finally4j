@@ -71,15 +71,15 @@ class UnboxingTest {
         try {
             return true;
         } finally {
-            Assertions.assertTrue(Finally.getReturnValueBoolean());
+            Assertions.assertTrue(Finally.returnedValueBoolean());
 
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -87,15 +87,15 @@ class UnboxingTest {
         try {
             return 1;
         } finally {
-            assertEquals(1, Finally.getReturnValueByte());
+            assertEquals(1, Finally.returnedValueByte());
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -103,15 +103,15 @@ class UnboxingTest {
         try {
             return 'a';
         } finally {
-            assertEquals('a', Finally.getReturnValueChar());
+            assertEquals('a', Finally.returnedValueChar());
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -119,15 +119,15 @@ class UnboxingTest {
         try {
             return 1;
         } finally {
-            assertEquals(1, Finally.getReturnValueShort());
+            assertEquals(1, Finally.returnedValueShort());
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -135,15 +135,15 @@ class UnboxingTest {
         try {
             return 1;
         } finally {
-            assertEquals(1, Finally.getReturnValueInt());
+            assertEquals(1, Finally.returnedValueInt());
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -151,15 +151,15 @@ class UnboxingTest {
         try {
             return 1L;
         } finally {
-            assertEquals(1L, Finally.getReturnValueLong());
+            assertEquals(1L, Finally.returnedValueLong());
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -167,15 +167,15 @@ class UnboxingTest {
         try {
             return 1f;
         } finally {
-            assertEquals(1f, Finally.getReturnValueFloat(), Float.MIN_VALUE);
+            assertEquals(1f, Finally.returnedValueFloat(), Float.MIN_VALUE);
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueDouble();  fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueDouble();  fail(""); } catch (ClassCastException ignored) {}
         }
     }
 
@@ -183,15 +183,15 @@ class UnboxingTest {
         try {
             return 1d;
         } finally {
-            assertEquals(1d, Finally.getReturnValueDouble(), Double.MIN_VALUE);
+            assertEquals(1d, Finally.returnedValueDouble(), Double.MIN_VALUE);
 
-            try { Finally.getReturnValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueByte();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueChar();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueShort();   fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueInt();     fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueLong();    fail(""); } catch (ClassCastException ignored) {}
-            try { Finally.getReturnValueFloat();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueBoolean(); fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueByte();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueChar();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueShort();   fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueInt();     fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueLong();    fail(""); } catch (ClassCastException ignored) {}
+            try { Finally.returnedValueFloat();   fail(""); } catch (ClassCastException ignored) {}
         }
     }
 }

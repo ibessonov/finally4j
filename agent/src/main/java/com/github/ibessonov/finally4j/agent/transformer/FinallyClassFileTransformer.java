@@ -23,8 +23,8 @@ import org.objectweb.asm.MethodVisitor;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
-import static com.github.ibessonov.finally4j.agent.FinallyAgentPreMain.DEBUG;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.ASM_V;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.DEBUG;
 import static org.objectweb.asm.ClassWriter.COMPUTE_FRAMES;
 import static org.objectweb.asm.ClassWriter.COMPUTE_MAXS;
 import static org.objectweb.asm.Opcodes.ICONST_0;
@@ -69,19 +69,20 @@ public class FinallyClassFileTransformer implements ClassFileTransformer {
             throw t;
         }
 
-        return cv.classWasTransformed ? cw.toByteArray() : null;
+        return cv.classTransformed ? cw.toByteArray() : null;
     }
 
     private static byte[] transformFinallyClass(byte[] classfileBuffer) {
         var cr = new ClassReader(classfileBuffer);
         var cw = new ClassWriter(cr, COMPUTE_MAXS | COMPUTE_FRAMES);
+
         var cv = new ClassVisitor(ASM_V, cw) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-                MethodVisitor outerMv = super.visitMethod(access, name, desc, signature, exceptions);
+                MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
 
                 if (name.equals(Constants.FINALLY_IS_SUPPORTED_METHOD_NAME)) {
-                    return new MethodVisitor(ASM_V, outerMv) {
+                    return new MethodVisitor(ASM_V, mv) {
                         @Override
                         public void visitInsn(int opcode) {
                             // Replace "false" with "true".
@@ -89,7 +90,7 @@ public class FinallyClassFileTransformer implements ClassFileTransformer {
                         }
                     };
                 } else {
-                    return outerMv;
+                    return mv;
                 }
             }
         };

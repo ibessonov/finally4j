@@ -55,12 +55,12 @@ class ComplexReturnTest {
                 return "true";
             }
         } finally {
-            assertEquals(hasReturnValue, Finally.hasReturnValue());
+            assertEquals(hasReturnValue, Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals(Optional.empty(), Finally.getReturnValueOptional());
+                assertEquals(Optional.empty(), Finally.returnedValueOptional());
             }
         }
 
@@ -75,12 +75,12 @@ class ComplexReturnTest {
 
             return "false";
         } finally {
-            assertTrue(Finally.hasReturnValue());
+            assertTrue(Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals("false", Finally.getReturnValue());
+                assertEquals("false", Finally.returnedValue());
             }
         }
     }
@@ -93,12 +93,12 @@ class ComplexReturnTest {
                 return "true";
             }
         } finally {
-            assertEquals(hasReturnValue, Finally.hasReturnValue());
+            assertEquals(hasReturnValue, Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals(Optional.empty(), Finally.getReturnValueOptional());
+                assertEquals(Optional.empty(), Finally.returnedValueOptional());
             }
         }
 
@@ -115,12 +115,12 @@ class ComplexReturnTest {
 
             return "false";
         } finally {
-            assertTrue(Finally.hasReturnValue());
+            assertTrue(Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals("false", Finally.getReturnValue());
+                assertEquals("false", Finally.returnedValue());
             }
         }
     }
@@ -135,12 +135,12 @@ class ComplexReturnTest {
                 return "true";
             }
         } finally {
-            assertEquals(hasReturnValue, Finally.hasReturnValue());
+            assertEquals(hasReturnValue, Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals(Optional.empty(), Finally.getReturnValueOptional());
+                assertEquals(Optional.empty(), Finally.returnedValueOptional());
             }
         }
 
@@ -159,12 +159,12 @@ class ComplexReturnTest {
 
             return "false";
         } finally {
-            assertTrue(Finally.hasReturnValue());
+            assertTrue(Finally.hasReturnedValue());
 
             if (hasReturnValue) {
-                assertEquals("true", Finally.getReturnValue());
+                assertEquals("true", Finally.returnedValue());
             } else {
-                assertEquals("false", Finally.getReturnValue());
+                assertEquals("false", Finally.returnedValue());
             }
         }
     }

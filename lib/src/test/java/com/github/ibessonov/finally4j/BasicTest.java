@@ -25,18 +25,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 /**
+ * Tests methods without try blocks.
+ *
  * @author ibessonov
  */
-class SupportTest {
+class BasicTest {
 
     @Test
     void finallyIsSupported() {
         assertTrue(Finally.isSupported());
+    }
 
-        assertFalse(Finally.hasReturnValue());
-        assertEquals(Optional.empty(), Finally.getReturnValueOptional());
+    @Test
+    void noReturnValue() {
+        assertFalse(Finally.hasReturnedValue());
+        assertEquals(Optional.empty(), Finally.returnedValueOptional());
+    }
 
+    @Test
+    void noThrownException() {
         assertFalse(Finally.hasThrownException());
-        assertEquals(Optional.empty(), Finally.getThrownExceptionOptional());
+        assertEquals(Optional.empty(), Finally.thrownExceptionOptional());
     }
 }

@@ -23,8 +23,6 @@ import java.lang.instrument.Instrumentation;
  * @author ibessonov
  */
 public final class FinallyAgentPreMain {
-    public static final boolean DEBUG = "true".equals(System.getProperty("finally4j.debug"));
-
     public static void premain(String args, Instrumentation instrumentation) {
         instrumentation.addTransformer(new FinallyClassFileTransformer());
     }

@@ -28,6 +28,7 @@ import static org.objectweb.asm.Opcodes.DLOAD;
 import static org.objectweb.asm.Opcodes.FLOAD;
 import static org.objectweb.asm.Opcodes.ILOAD;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
+import static org.objectweb.asm.Opcodes.INVOKEVIRTUAL;
 import static org.objectweb.asm.Opcodes.IRETURN;
 import static org.objectweb.asm.Opcodes.ISTORE;
 import static org.objectweb.asm.Opcodes.LLOAD;
@@ -38,6 +39,8 @@ import static org.objectweb.asm.tree.AbstractInsnNode.LABEL;
  * @author ibessonov
  */
 class Util {
+    static final boolean DEBUG = "true".equals(System.getProperty("finally4j.debug"));
+
     static int ASM_V = ASM7;
 
     static AbstractInsnNode findPreviousInstruction(AbstractInsnNode node) {
@@ -151,14 +154,23 @@ class Util {
                 "ofNullable", "(Ljava/lang/Object;)Ljava/util/Optional;", false);
     }
 
+    static MethodInsnNode optionalOf() {
+        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
+                "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
+    }
+
     static MethodInsnNode valueOf(char returnTypeDescriptor) {
         return new MethodInsnNode(INVOKESTATIC, toBoxedInternalName(returnTypeDescriptor),
                 "valueOf", getMethodDescriptorForValueOf(returnTypeDescriptor),false);
     }
 
-    static MethodInsnNode optionalOf() {
-        return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
-                "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
+    static MethodInsnNode primitiveValue(char returnTypeDescriptor) {
+        String primitiveName = toPrimitiveName(returnTypeDescriptor);
+        String boxedInternalName = toBoxedInternalName(returnTypeDescriptor);
+
+        return new MethodInsnNode(INVOKEVIRTUAL,
+                boxedInternalName, primitiveName + "Value",
+                "()" + returnTypeDescriptor, false);
     }
 
     static boolean validBlock(TryCatchBlockNode block) {

@@ -30,22 +30,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SuccessfulTest {
     @Test
-    void throwInTry() {
+    void throwInTryUnconditional() {
         try {
             try {
-                //TODO Removing this "if" breaks the test. I messed up somewhere.
+                Thread.currentThread();
+
+                throw new Exception();
+            } finally {
+                assertTrue(Finally.hasThrownException());
+
+                Throwable e = Finally.thrownException();
+
+                assertNotNull(e);
+                assertEquals(Exception.class, e.getClass());
+
+                assertEquals(Optional.of(e), Finally.thrownExceptionOptional());
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Test
+    void throwInTryConditional() {
+        try {
+            try {
                 if (System.currentTimeMillis() != 0) {
                     throw new Exception();
                 }
             } finally {
                 assertTrue(Finally.hasThrownException());
 
-                Throwable e = Finally.getThrownException();
+                Throwable e = Finally.thrownException();
 
                 assertNotNull(e);
                 assertEquals(Exception.class, e.getClass());
 
-                assertEquals(Optional.of(e), Finally.getThrownExceptionOptional());
+                assertEquals(Optional.of(e), Finally.thrownExceptionOptional());
             }
         } catch (Exception ignored) {
         }

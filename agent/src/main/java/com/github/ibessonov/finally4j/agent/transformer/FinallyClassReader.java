@@ -16,9 +16,11 @@ class FinallyClassReader extends ClassReader {
     @Override
     public String readUTF8(int index, char[] buf) {
         String utf8str = super.readUTF8(index, buf);
+
         if (!hasFinallyReferenced && utf8str != null) {
             hasFinallyReferenced = utf8str.equals(Constants.FINALLY_CLASS_INTERNAL_NAME);
         }
+
         return utf8str;
     }
 }

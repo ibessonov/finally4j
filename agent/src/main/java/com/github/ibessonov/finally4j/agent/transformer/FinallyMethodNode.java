@@ -40,8 +40,9 @@ import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import static com.github.ibessonov.finally4j.agent.FinallyAgentPreMain.DEBUG;
+import static com.github.ibessonov.finally4j.agent.transformer.Block.startsWith;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.ASM_V;
+import static com.github.ibessonov.finally4j.agent.transformer.Util.DEBUG;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextInstruction;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextLabel;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousInstruction;
@@ -66,7 +67,6 @@ import static org.objectweb.asm.Opcodes.ICONST_0;
 import static org.objectweb.asm.Opcodes.ICONST_1;
 import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
-import static org.objectweb.asm.Opcodes.INVOKEVIRTUAL;
 import static org.objectweb.asm.Opcodes.NEW;
 import static org.objectweb.asm.tree.AbstractInsnNode.METHOD_INSN;
 
@@ -87,7 +87,7 @@ class FinallyMethodNode extends MethodNode {
     /**
      * Mapping of all labels into their sequence number.
      */
-    private final Map<LabelNode, Integer> labelsMap = new IdentityHashMap<>();
+    final Map<LabelNode, Integer> labelIdx = new IdentityHashMap<>();
 
     FinallyMethodNode(MethodVisitor outerMv, Runnable methodTransformedClosure,
                       int access, String name, String desc, String signature, String[] exceptions) {
@@ -98,7 +98,10 @@ class FinallyMethodNode extends MethodNode {
 
     @Override
     public void visitEnd() {
-        initLabels();
+        // Calculate indexes for all labels in the method.
+        Stream.iterate(super.instructions.getFirst(), Objects::nonNull, AbstractInsnNode::getNext)
+                .filter(node1 -> node1.getType() == AbstractInsnNode.LABEL)
+                .forEach(node1 -> labelIdx.put((LabelNode) node1, labelIdx.size()));
 
         List<Try> tryList = initTryList();
 
@@ -143,18 +146,20 @@ class FinallyMethodNode extends MethodNode {
                         // Checking the first "store" is DEFINITELY NOT ENOUGH.
                         LabelNode theEndOfFinally = findTheEndOfFinally(block.end, false);
 
-                        nextBlock = new Block(theEndOfFinally, null);
+                        nextBlock = new Block(this, theEndOfFinally, null);
                     } else {
                         nextBlock = scope.blocks.get(i + 1);
                     }
 
-                    return new Block(block.end, nextBlock.start);
+                    return new Block(this, block.end, nextBlock.start);
                 });
             }).filter(Objects::nonNull).filter(b -> b.startIndex() < b.endIndex());
 
             returnFinallyBlocks.forEach(finallyBlock -> {
                 //TODO This code is bad. It doesn't cover nested stuff at all.
-                System.out.println("  Finally block in try " + finallyBlock);
+                if (DEBUG) {
+                    System.out.println("  Finally block in try " + finallyBlock);
+                }
                 AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
                 //TODO Not the best way to find "return" finally blocks.
                 // May be false-positive if there's a simple assignment at the end.
@@ -171,7 +176,7 @@ class FinallyMethodNode extends MethodNode {
                             MethodInsnNode methodInstruction = (MethodInsnNode) node;
                             if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
                                 switch (methodInstruction.name) {
-                                    case Constants.FINALLY_HAS_RETURN_VALUE_METHOD_NAME: {
+                                    case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME: {
                                         node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
                                         break;
                                     }
@@ -180,7 +185,7 @@ class FinallyMethodNode extends MethodNode {
                                         break;
                                     }
                                     default:
-                                        node = processFinallyMethodWithReturn(node, methodInstruction, storeInstruction.var);
+                                        node = processFinallyMethodWithReturn(methodInstruction, storeInstruction.var);
                                 }
                             }
                         }
@@ -188,7 +193,7 @@ class FinallyMethodNode extends MethodNode {
                 }
             });
 
-            // Now exceptions.
+            // No exceptions.
             IntStream.range(0, aTry.catchScopes.size()).forEach(i -> {
                 Scope catchScope = aTry.catchScopes.get(i);
 
@@ -215,7 +220,7 @@ class FinallyMethodNode extends MethodNode {
                 assert isStore(firstCatchInstruction);
 
                 var storeInstruction = (VarInsnNode) firstCatchInstruction;
-                Block finallyBlock = new Block(startLabel, endLabel);
+                Block finallyBlock = new Block(this, startLabel, endLabel);
 
                 replaceExceptionInstructions(storeInstruction, finallyBlock);
             });
@@ -239,7 +244,7 @@ class FinallyMethodNode extends MethodNode {
                 MethodInsnNode methodInstruction = (MethodInsnNode) node;
                 if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
                     switch (methodInstruction.name) {
-                        case Constants.FINALLY_HAS_RETURN_VALUE_METHOD_NAME: {
+                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME: {
                             node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
                             break;
                         }
@@ -261,7 +266,7 @@ class FinallyMethodNode extends MethodNode {
 
     private Stream<TryCatchBlockNode> splitTryCatchBlockNode(List<TryCatchBlockNode> mergedTryCatchBlocks, TryCatchBlockNode block) {
         return mergedTryCatchBlocks.stream()
-                .filter(b -> b.start == block.start && getLabelIndex(b.end) < getLabelIndex(block.end))
+                .filter(b -> b.start == block.start && (int) labelIdx.get(b.end) < labelIdx.get(block.end))
                 //TODO I need a good comment about why there cannot be two blocks that satisfy the condition.
                 // Seems arbitrary, you know.
                 .findAny()
@@ -273,61 +278,6 @@ class FinallyMethodNode extends MethodNode {
                 )).orElse(
                         Stream.of(block)
                 );
-    }
-
-    static class Try {
-        final Scope tryScope = new Scope();
-
-        final List<Scope> catchScopes = new ArrayList<>();
-
-        final Scope finallyScope = new Scope();
-
-        void print(String padding) {
-            String nestedPadding = padding + "  ";
-
-            System.out.println(padding + "try " + tryScope.blocks + " {");
-            for (Try nestedTry : tryScope.nested) {
-                nestedTry.print(nestedPadding);
-            }
-
-            for (Scope catchScope : catchScopes) {
-                System.out.println(padding + "} catch " + catchScope.blocks + " {");
-                for (Try nestedTry : catchScope.nested) {
-                    nestedTry.print(nestedPadding);
-                }
-            }
-
-            System.out.println(padding + "} finally " + finallyScope.first() + " {");
-            for (Try nestedTry : finallyScope.nested) {
-                nestedTry.print(nestedPadding);
-            }
-
-            System.out.println(padding + "}");
-        }
-    }
-
-    static class Scope {
-        final List<Block> blocks = new ArrayList<>();
-
-        final List<Try> nested = new ArrayList<>();
-
-        boolean surrounds(Try aTry) {
-            Block first = first();
-            Block last = last();
-
-            Block tryFirst = aTry.tryScope.first();
-            Block tryLast = aTry.finallyScope.last();
-
-            return first.startIndex() <= tryFirst.startIndex() && tryLast.endIndex() <= last.endIndex();
-        }
-
-        private Block first() {
-            return blocks.get(0);
-        }
-
-        private Block last() {
-            return blocks.get(blocks.size() - 1);
-        }
     }
 
     private List<Try> initTryList() {
@@ -353,11 +303,11 @@ class FinallyMethodNode extends MethodNode {
 
         // Sort values in "blocksGroupedByHandler" and "blocksGroupedByDefaultHandler" to simplify matching them.
         concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
-                .forEach(list -> list.sort(comparingInt(node -> getLabelIndex(node.start))));
+                .forEach(list -> list.sort(comparingInt(node -> labelIdx.get(node.start))));
 
         // Maps "try" sections to lists of corresponding "catch" sections. Without finally blocks.
         var catchBlocksMap = blocksGroupedByHandler.entrySet().stream().collect(
-                groupingBy(entry -> entry.getValue().stream().map(Block::new).collect(toList()),
+                groupingBy(entry -> entry.getValue().stream().map(node -> new Block(this, node)).collect(toList()),
                 mapping(Entry::getKey, toList()))
         );
 
@@ -366,7 +316,7 @@ class FinallyMethodNode extends MethodNode {
         for (Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByDefaultHandler.entrySet()) {
             List<TryCatchBlockNode> list = entry.getValue();
 
-            List<Block> blocks = list.stream().map(node -> new Block(node.start, node.end)).collect(toList());
+            List<Block> blocks = list.stream().map(node -> new Block(this, node.start, node.end)).collect(toList());
 
             LabelNode nextLabel = findTheEndOfFinally(entry.getKey(), true);
 
@@ -377,7 +327,7 @@ class FinallyMethodNode extends MethodNode {
 
                 if (startsWith(blocks, prefix)) {
                     List<LabelNode> value = catchBlocksMapEntry.getValue();
-                    value.sort(comparingInt(this::getLabelIndex));
+                    value.sort(comparingInt(label -> labelIdx.get(label)));
 
                     Try newTry = new Try();
 
@@ -403,7 +353,7 @@ class FinallyMethodNode extends MethodNode {
                     }
                     newTry.catchScopes.add(cur);
 
-                    newTry.finallyScope.blocks.add(new Block(entry.getKey(), nextLabel));
+                    newTry.finallyScope.blocks.add(new Block(this, entry.getKey(), nextLabel));
 
                     catchBlocksMap.remove(prefix);
 
@@ -419,7 +369,7 @@ class FinallyMethodNode extends MethodNode {
 
                 // No catch blocks.
                 newTry.tryScope.blocks.addAll(blocks);
-                newTry.finallyScope.blocks.add(new Block(entry.getKey(), nextLabel));
+                newTry.finallyScope.blocks.add(new Block(this, entry.getKey(), nextLabel));
 
                 tempTryList.add(newTry);
 
@@ -504,7 +454,7 @@ class FinallyMethodNode extends MethodNode {
                 jumpLabels.add(label);
 
                 if (DEBUG) {
-                    System.out.println("  Jump to " + getLabelIndex(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
+                    System.out.println("  Jump to " + labelIdx.get(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
                 }
 
                 continue;
@@ -523,68 +473,72 @@ class FinallyMethodNode extends MethodNode {
         }
     }
 
-    private boolean startsWith(List<Block> blocks, List<Block> prefix) {
-        if (blocks.size() < prefix.size()) {
-            return false;
+    /**
+     * Replaces the {@code Finally.returnedValue*()} call with the actual returned value.
+     *
+     * @param methodInstruction Invoke instruction node.
+     * @param var Variable index of the return value.
+     * @return New instruction node that replaced the invoke instruction, or the original instruction if nothing happened.
+     */
+    private AbstractInsnNode processFinallyMethodWithReturn(MethodInsnNode methodInstruction, int var) {
+        if (!methodInstruction.name.startsWith(Constants.FINALLY_GET_RETURNED_VALUE_METHOD_PREFIX)) {
+            return methodInstruction;
         }
 
-        return blocks.subList(0, prefix.size()).equals(prefix);
-    }
+        char returnType = super.desc.charAt(super.desc.length() - 1);
+        assert returnType != 'V' : "Returning of void passed somehow";
 
-    private AbstractInsnNode processFinallyMethodWithReturn(AbstractInsnNode node, MethodInsnNode methodInstruction, int var) {
-        if (methodInstruction.name.startsWith(Constants.FINALLY_GET_RETURN_VALUE_METHOD_PREFIX)) {
-            char returnType = super.desc.charAt(super.desc.length() - 1);
-            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(returnType), var));
+        // Replace INVOKE* with *LOAD.
+        AbstractInsnNode node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(returnType), var));
 
-            assert returnType != 'V' : "Returning of void passed somehow";
+        if (returnType == ';') { // Method returns "Object", essentially.
+            switch (methodInstruction.name) {
+                case Constants.FINALLY_GET_RETURNED_VALUE_OPTIONAL_METHOD_NAME:
+                    // Wrap the head of the stack into a "Optional.ofNullable".
+                    super.instructions.insert(node, Util.optionalOfNullable());
 
-            if (returnType == ';') {
-                switch (methodInstruction.name) {
-                    case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
-                        super.instructions.insert(node, Util.optionalOfNullable());
+                //noinspection fallthrough
+                case Constants.FINALLY_GET_RETURNED_VALUE_METHOD_NAME:
+                    break;
 
-                    //noinspection fallthrough
-                    case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
-                        break;
+                default:
+                    char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
+                    String boxedInternalName = toBoxedInternalName(currentType);
 
-                    default:
-                        char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
-                        String primitiveName = toPrimitiveName(currentType);
-                        String boxedInternalName = toBoxedInternalName(currentType);
+                    // Insert instructions in reverse order.
+                    // In reality the CHECKCAST is first, and INVOKEVIRTUAL is second.
+                    super.instructions.insert(node, Util.primitiveValue(currentType));
+                    super.instructions.insert(node, new TypeInsnNode(CHECKCAST, boxedInternalName));
+            }
+        } else { // Method returns primitive type.
+            switch (methodInstruction.name) {
+                case Constants.FINALLY_GET_RETURNED_VALUE_OPTIONAL_METHOD_NAME:
+                    // Insert instructions in reverse order. "Optional.of" goes last.
+                    super.instructions.insert(node, Util.optionalOf());
 
-                        super.instructions.insert(node, new MethodInsnNode(INVOKEVIRTUAL,
-                                boxedInternalName, primitiveName + "Value",
-                                "()" + currentType, false));
-                        super.instructions.insert(node, new TypeInsnNode(CHECKCAST, boxedInternalName));
-                }
-            } else { // method returns primitive type
-                switch (methodInstruction.name) {
-                    case Constants.FINALLY_GET_RETURN_VALUE_OPTIONAL_METHOD_NAME:
-                        super.instructions.insert(node, Util.optionalOf());
+                //noinspection fallthrough
+                case Constants.FINALLY_GET_RETURNED_VALUE_METHOD_NAME:
+                    super.instructions.insert(node, Util.valueOf(returnType));
+                    break;
 
-                    //noinspection fallthrough
-                    case Constants.FINALLY_GET_RETURN_VALUE_METHOD_NAME:
-                        super.instructions.insert(node, Util.valueOf(returnType));
-                        break;
+                default:
+                    char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
+                    if (currentType != returnType) {
+                        // Old method invocation left untouched to preserve bytecode consistency, just in case.
+                        node = replaceInstruction(node, methodInstruction);
 
-                    default:
-                        char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
-                        if (currentType != returnType) {
-                            // old method invocation left untouched to preserve bytecode consistency
-                            node = replaceInstruction(node, methodInstruction);
+                        String message = toPrimitiveName(currentType) + " cannot be cast to " + toPrimitiveName(returnType);
 
-                            String message = toPrimitiveName(currentType) + " cannot be cast to " + toPrimitiveName(returnType);
-
-                            // bytecode for "throw new ClassCastException(message);"
-                            super.instructions.insertBefore(node, new TypeInsnNode(NEW, "java/lang/ClassCastException"));
-                            super.instructions.insertBefore(node, new InsnNode(DUP));
-                            super.instructions.insertBefore(node, new LdcInsnNode(message));
-                            super.instructions.insertBefore(node, new MethodInsnNode(INVOKESPECIAL, "java/lang/ClassCastException", "<init>", "(Ljava/lang/String;)V", false));
-                            super.instructions.insertBefore(node, new InsnNode(ATHROW));
-                        }
-                }
+                        // Bytecode for "throw new ClassCastException(message);".
+                        super.instructions.insertBefore(node, new TypeInsnNode(NEW, "java/lang/ClassCastException"));
+                        super.instructions.insertBefore(node, new InsnNode(DUP));
+                        super.instructions.insertBefore(node, new LdcInsnNode(message));
+                        super.instructions.insertBefore(node, new MethodInsnNode(INVOKESPECIAL, "java/lang/ClassCastException", "<init>", "(Ljava/lang/String;)V", false));
+                        super.instructions.insertBefore(node, new InsnNode(ATHROW));
+                    }
             }
         }
+
         return node;
     }
 
@@ -595,64 +549,5 @@ class FinallyMethodNode extends MethodNode {
         methodTransformedClosure.run();
 
         return to;
-    }
-
-    private final class Block {
-        final LabelNode start;
-        final LabelNode end;
-
-        Block(LabelNode start, LabelNode end) {
-            this.start = start;
-            this.end = end;
-        }
-
-        Block(TryCatchBlockNode node) {
-            this(node.start, node.end);
-        }
-
-        int startIndex() {
-            return getLabelIndex(start);
-        }
-
-        int endIndex() {
-            return getLabelIndex(end);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            Block block = (Block) o;
-
-            return start.equals(block.start) && end.equals(block.end);
-        }
-
-        @Override
-        public int hashCode() {
-            return start.hashCode() ^ end.hashCode();
-        }
-
-        @Override
-        public String toString() {
-            return "[" + getLabelIndex(start) + ", " + (end == null ? "end" : getLabelIndex(end)) + ")";
-        }
-    }
-
-    private enum ReturnOrThrow {
-        RETURN, THROW, NOOP
-    }
-
-    /**
-     * Initializes {@link #labelsMap} and {@link #labels}, by scanning through {@link #instructions}
-     */
-    private void initLabels() {
-        Stream.iterate(super.instructions.getFirst(), Objects::nonNull, AbstractInsnNode::getNext)
-                .filter(node -> node.getType() == AbstractInsnNode.LABEL)
-                .forEach(node -> labelsMap.put((LabelNode) node, labelsMap.size()));
-    }
-
-    private int getLabelIndex(LabelNode label) {
-        return labelsMap.get(label);
     }
 }

@@ -20,6 +20,7 @@ import java.util.Optional;
 /**
  * Utility class that provides special functionality inside of {@code finally} code blocks. Only works if corresponding
  * java agent library is set in JVM parameters.
+ *
  * @author ibessonov
  */
 public interface Finally {
@@ -29,7 +30,7 @@ public interface Finally {
     class NoThrownExceptionException extends RuntimeException {}
 
     /**
-     * @return true if {@code finally4j-agent.jar} agent is configured properly
+     * @return {@code true} if {@code finally4j-agent.jar} agent is configured properly, {@code false} otherwise.
      */
     static boolean isSupported() {
         return false;
@@ -39,7 +40,7 @@ public interface Finally {
      * @return true if invoked in {@code finally} block that is executed due to return statement in
      * corresponding {@code try/catch} block
      */
-    static boolean hasReturnValue() {
+    static boolean hasReturnedValue() {
         return false;
     }
 
@@ -48,9 +49,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code boolean} or {@code Boolean}
      * @throws NullPointerException if type of actual return value is {@code Boolean} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static boolean getReturnValueBoolean() {
+    static boolean returnedValueBoolean() {
         throw new NoReturnValueException();
     }
 
@@ -59,9 +60,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code byte} or {@code Byte}
      * @throws NullPointerException if type of actual return value is {@code Byte} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static byte getReturnValueByte() {
+    static byte returnedValueByte() {
         throw new NoReturnValueException();
     }
 
@@ -70,9 +71,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code char} or {@code Character}
      * @throws NullPointerException if type of actual return value is {@code Character} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static char getReturnValueChar() {
+    static char returnedValueChar() {
         throw new NoReturnValueException();
     }
 
@@ -81,9 +82,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code short} or {@code Short}
      * @throws NullPointerException if type of actual return value is {@code Short} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static short getReturnValueShort() {
+    static short returnedValueShort() {
         throw new NoReturnValueException();
     }
 
@@ -92,9 +93,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code int} or {@code Integer}
      * @throws NullPointerException if type of actual return value is {@code Integer} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static int getReturnValueInt() {
+    static int returnedValueInt() {
         throw new NoReturnValueException();
     }
 
@@ -103,9 +104,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code long} or {@code Long}
      * @throws NullPointerException if type of actual return value is {@code Long} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static long getReturnValueLong() {
+    static long returnedValueLong() {
         throw new NoReturnValueException();
     }
 
@@ -114,9 +115,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code float} or {@code Float}
      * @throws NullPointerException if type of actual return value is {@code Float} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static float getReturnValueFloat() {
+    static float returnedValueFloat() {
         throw new NoReturnValueException();
     }
 
@@ -125,9 +126,9 @@ public interface Finally {
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value is not {@code double} or {@code Double}
      * @throws NullPointerException if type of actual return value is {@code Double} and it equals {@code null}
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static double getReturnValueDouble() {
+    static double returnedValueDouble() {
         throw new NoReturnValueException();
     }
 
@@ -136,9 +137,9 @@ public interface Finally {
      * type of actual return value is primitive
      * @throws NoReturnValueException outside of {@code finally} block or if no value was actually returned
      * @throws ClassCastException if type of actual returned value differs from expected type
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      */
-    static <T> T getReturnValue() {
+    static <T> T returnedValue() {
         throw new NoReturnValueException();
     }
 
@@ -146,10 +147,10 @@ public interface Finally {
      * @return Optional for value that was returned in corresponding {@code try/catch} block. Returns empty optional outside
      * of {@code finally} block or if no value was actually returned. Value is automatically boxed if
      * type of actual return value is primitive
-     * @see Finally#hasReturnValue()
+     * @see Finally#hasReturnedValue()
      * @see Optional
      */
-    static <T> Optional<T> getReturnValueOptional() {
+    static <T> Optional<T> returnedValueOptional() {
         return Optional.empty();
     }
 
@@ -167,7 +168,7 @@ public interface Finally {
      * @throws ClassCastException if type of actual exception differs from expected type
      * @see Finally#hasThrownException()
      */
-    static <T extends Throwable> T getThrownException() {
+    static <T extends Throwable> T thrownException() {
         throw new NoThrownExceptionException();
     }
 
@@ -176,7 +177,7 @@ public interface Finally {
      * outside of {@code finally} block or if no exception was actually thrown
      * @see Finally#hasThrownException()
      */
-    static <T extends Throwable> Optional<T> getThrownExceptionOptional() {
+    static <T extends Throwable> Optional<T> thrownExceptionOptional() {
         return Optional.empty();
     }
 }

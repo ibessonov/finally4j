@@ -76,10 +76,10 @@ class ReturnTypesTest {
         try {
             return true;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertTrue(Finally.getReturnValueBoolean());
-            assertEquals(Boolean.TRUE, Finally.getReturnValue());
-            assertEquals(Optional.of(true), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertTrue(Finally.returnedValueBoolean());
+            assertEquals(Boolean.TRUE, Finally.returnedValue());
+            assertEquals(Optional.of(true), Finally.returnedValueOptional());
         }
     }
 
@@ -87,10 +87,10 @@ class ReturnTypesTest {
         try {
             return 1;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1, Finally.getReturnValueByte());
-            assertEquals(Byte.valueOf((byte) 1), Finally.getReturnValue());
-            assertEquals(Optional.of((byte) 1), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1, Finally.returnedValueByte());
+            assertEquals(Byte.valueOf((byte) 1), Finally.returnedValue());
+            assertEquals(Optional.of((byte) 1), Finally.returnedValueOptional());
         }
     }
 
@@ -98,10 +98,10 @@ class ReturnTypesTest {
         try {
             return 'a';
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals('a', Finally.getReturnValueChar());
-            assertEquals(Character.valueOf('a'), Finally.getReturnValue());
-            assertEquals(Optional.of('a'), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals('a', Finally.returnedValueChar());
+            assertEquals(Character.valueOf('a'), Finally.returnedValue());
+            assertEquals(Optional.of('a'), Finally.returnedValueOptional());
         }
     }
 
@@ -109,10 +109,10 @@ class ReturnTypesTest {
         try {
             return 1;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1, Finally.getReturnValueShort());
-            assertEquals(Short.valueOf((short) 1), Finally.getReturnValue());
-            assertEquals(Optional.of((short) 1), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1, Finally.returnedValueShort());
+            assertEquals(Short.valueOf((short) 1), Finally.returnedValue());
+            assertEquals(Optional.of((short) 1), Finally.returnedValueOptional());
         }
     }
 
@@ -120,10 +120,10 @@ class ReturnTypesTest {
         try {
             return 1;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1, Finally.getReturnValueInt());
-            assertEquals(Integer.valueOf(1), Finally.getReturnValue());
-            assertEquals(Optional.of(1), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1, Finally.returnedValueInt());
+            assertEquals(Integer.valueOf(1), Finally.returnedValue());
+            assertEquals(Optional.of(1), Finally.returnedValueOptional());
         }
     }
 
@@ -131,10 +131,10 @@ class ReturnTypesTest {
         try {
             return 1L;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1L, Finally.getReturnValueLong());
-            assertEquals(Long.valueOf(1L), Finally.getReturnValue());
-            assertEquals(Optional.of(1L), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1L, Finally.returnedValueLong());
+            assertEquals(Long.valueOf(1L), Finally.returnedValue());
+            assertEquals(Optional.of(1L), Finally.returnedValueOptional());
         }
     }
 
@@ -142,10 +142,10 @@ class ReturnTypesTest {
         try {
             return 1f;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1f, Finally.getReturnValueFloat(), Float.MIN_VALUE);
-            assertEquals(Float.valueOf(1f), Finally.getReturnValue());
-            assertEquals(Optional.of(1f), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1f, Finally.returnedValueFloat(), Float.MIN_VALUE);
+            assertEquals(Float.valueOf(1f), Finally.returnedValue());
+            assertEquals(Optional.of(1f), Finally.returnedValueOptional());
         }
     }
 
@@ -153,10 +153,10 @@ class ReturnTypesTest {
         try {
             return 1d;
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals(1d, Finally.getReturnValueDouble(), Double.MIN_VALUE);
-            assertEquals(Double.valueOf(1d), Finally.getReturnValue());
-            assertEquals(Optional.of(1d), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals(1d, Finally.returnedValueDouble(), Double.MIN_VALUE);
+            assertEquals(Double.valueOf(1d), Finally.returnedValue());
+            assertEquals(Optional.of(1d), Finally.returnedValueOptional());
         }
     }
 
@@ -164,9 +164,9 @@ class ReturnTypesTest {
         try {
             return "1";
         } finally {
-            assertTrue(Finally.hasReturnValue());
-            assertEquals("1", Finally.getReturnValue());
-            assertEquals(Optional.of("1"), Finally.getReturnValueOptional());
+            assertTrue(Finally.hasReturnedValue());
+            assertEquals("1", Finally.returnedValue());
+            assertEquals(Optional.of("1"), Finally.returnedValueOptional());
         }
     }
 }

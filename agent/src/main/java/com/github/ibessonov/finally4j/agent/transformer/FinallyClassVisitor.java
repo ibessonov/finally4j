@@ -8,7 +8,7 @@ import org.objectweb.asm.MethodVisitor;
  * Class visitor implementation that transforms all methods that call methods of "Finally" class.
  */
 class FinallyClassVisitor extends ClassVisitor {
-    boolean classWasTransformed;
+    boolean classTransformed;
 
     private final Runnable callback;
 
@@ -16,7 +16,7 @@ class FinallyClassVisitor extends ClassVisitor {
         super(Util.ASM_V, cw);
 
         // Make this a field for mostly aesthetic purposes.
-        callback = () -> classWasTransformed = true;
+        callback = () -> classTransformed = true;
     }
 
     @Override

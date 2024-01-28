@@ -1,7 +1,7 @@
 package com.github.ibessonov.finally4j.ret;
 
 import com.github.ibessonov.finally4j.Finally;
-import org.junit.jupiter.api.Assertions;
+import com.github.ibessonov.finally4j.Finally.NoReturnValueException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -14,23 +14,24 @@ public class VoidReturnTest {
     @Test
     void terminalFinallyBlockInTry() {
         try {
-            //noinspection ResultOfMethodCallIgnored
             Thread.currentThread();
         } finally {
-            Assertions.assertFalse(Finally.hasReturnValue());
-            assertEquals(Optional.empty(), Finally.getReturnValueOptional());
-            try { Finally.getReturnValue(); fail(""); } catch (Finally.NoReturnValueException ignored) {}
+            assertFalse(Finally.hasReturnedValue());
+            assertEquals(Optional.empty(), Finally.returnedValueOptional());
+
+            try { Finally.returnedValue(); fail(""); } catch (NoReturnValueException ignored) {}
         }
     }
 
     @Test
-    void middleFinallyBlockInTry() {
+    void nonTerminalFinallyBlockInTry() {
         try {
             if (System.currentTimeMillis() != 0) return;
         } finally {
-            assertFalse(Finally.hasReturnValue());
-            assertEquals(Optional.empty(), Finally.getReturnValueOptional());
-            try { Finally.getReturnValue(); fail(""); } catch (Finally.NoReturnValueException ignored) {}
+            assertFalse(Finally.hasReturnedValue());
+            assertEquals(Optional.empty(), Finally.returnedValueOptional());
+
+            try { Finally.returnedValue(); fail(""); } catch (NoReturnValueException ignored) {}
         }
     }
 }
