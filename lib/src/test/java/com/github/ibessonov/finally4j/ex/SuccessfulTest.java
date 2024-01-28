@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Ivan Bessonov
+ * Copyright 2024 Ivan Bessonov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author ibessonov
  */
 class SuccessfulTest {
+    @Test
+    void noException() {
+        try {
+            Thread.currentThread();
+        } catch (RuntimeException e) {
+            fail("re");
+        } catch (Exception e) {
+            fail("e");
+        } finally {
+            assertFalse(Finally.hasThrownException());
+        }
+    }
+
     @Test
     void throwInTryUnconditional() {
         try {
@@ -57,6 +71,8 @@ class SuccessfulTest {
                 if (System.currentTimeMillis() != 0) {
                     throw new Exception();
                 }
+
+                Thread.currentThread();
             } finally {
                 assertTrue(Finally.hasThrownException());
 
@@ -68,19 +84,6 @@ class SuccessfulTest {
                 assertEquals(Optional.of(e), Finally.thrownExceptionOptional());
             }
         } catch (Exception ignored) {
-        }
-    }
-
-    @Test
-    void noException() {
-        try {
-            System.out.println(1);
-        } catch (RuntimeException e) {
-            System.out.println("re");
-        } catch (Exception e) {
-            System.out.println("e");
-        } finally {
-            assertFalse(Finally.hasThrownException());
         }
     }
 

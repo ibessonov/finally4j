@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Ivan Bessonov
+ * Copyright 2024 Ivan Bessonov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,7 @@ import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
 import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
 import static java.util.Comparator.comparingInt;
+import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.groupingBy;
 import static java.util.stream.Collectors.mapping;
 import static java.util.stream.Collectors.toList;
@@ -131,93 +132,7 @@ class FinallyMethodNode extends MethodNode {
         }
 
         for (Try aTry : tryList) {
-            Stream<Block> returnFinallyBlocks = concat(Stream.of(aTry.tryScope), aTry.catchScopes.stream()).flatMap(scope -> {
-                return IntStream.range(0, scope.blocks.size()).mapToObj(i -> {
-                    Block block = scope.blocks.get(i);
-
-                    Block nextBlock;
-
-                    if (block == scope.last()) {
-                        if (!isStore(findPreviousInstruction(block.end))) {
-                            return null; // This one should end with exceptional finally block, so I ignore it.
-                        }
-
-                        /*
-                         * You can't just read the next catch or finally block, that would be too easy, right?
-                         * That's because 2 last finally blocks can be slapped together, for example, here:
-                         * try {
-                         *     if (foo()) return bar();
-                         * } finally {
-                         *     baz();
-                         * }
-                         * It means that the "last" finally block must be split manually.
-                         */
-                        //TODO Here we may have a false-positive detection of a "return" finally block.
-                        // How to avoid it: if default finally doesn't end with "return", we can derive that the
-                        // "load" and "return" at the end mean that the block is in fact a return block.
-                        // Checking the first "store" is DEFINITELY NOT ENOUGH.
-                        LabelNode theEndOfFinally = findTheEndOfFinally(block.end, false);
-
-                        nextBlock = new Block(this, theEndOfFinally, null);
-                    } else {
-                        nextBlock = scope.blocks.get(i + 1);
-                    }
-
-                    return new Block(this, block.end, nextBlock.start);
-                });
-            }).filter(Objects::nonNull).filter(b -> b.startIndex() < b.endIndex());
-
-            returnFinallyBlocks.forEach(finallyBlock -> {
-                //TODO This code is bad. It doesn't cover nested stuff at all.
-                if (DEBUG) {
-                    System.out.println("  Finally block in try " + finallyBlock);
-                }
-                AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
-                //TODO Not the best way to find "return" finally blocks.
-                // May be false-positive if there's a simple assignment at the end.
-                // One way to avoid that would be checking the end of "finally" block for corresponding "load" instruction.
-                // But, it only works when the finally block itself doesn't have a return or throw at the end, that is
-                // the worst case scenario. There's no way to tell the difference then. I guess I just document it and that's it.
-                if (isStore(previousInstruction)) {
-                    VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
-
-                    replaceReturnedValueInstructions(storeInstruction, finallyBlock);
-                }
-            });
-
-            // No exceptions.
-            IntStream.range(0, aTry.catchScopes.size()).forEach(i -> {
-                Scope catchScope = aTry.catchScopes.get(i);
-
-                Block lastBlock = catchScope.last();
-
-                LabelNode startLabel = lastBlock.end;
-
-                LabelNode endLabel = i == aTry.catchScopes.size() - 1
-                        ? aTry.finallyScope.first().start
-                        : aTry.catchScopes.get(i + 1).first().start;
-
-                if (isStore(findPreviousInstruction(lastBlock.end))) {
-                    LabelNode theEndOfFinally = findTheEndOfFinally(lastBlock.end, false);
-
-                    if (theEndOfFinally == endLabel) {
-                        return;
-                    } else {
-                        startLabel = theEndOfFinally;
-                    }
-                }
-
-                AbstractInsnNode firstCatchInstruction = findNextInstruction(catchScope.first().start);
-
-                assert isStore(firstCatchInstruction);
-
-                var storeInstruction = (VarInsnNode) firstCatchInstruction;
-                Block finallyBlock = new Block(this, startLabel, endLabel);
-
-                replaceExceptionInstructions(storeInstruction, finallyBlock);
-            });
-
-            replaceExceptionInstructions((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start), aTry.finallyScope.first());
+            replaceInstructionsInTryBlock(aTry);
         }
 
         if (DEBUG) {
@@ -226,6 +141,105 @@ class FinallyMethodNode extends MethodNode {
         }
 
         super.accept(outerMv);
+    }
+
+    private void replaceInstructionsInTryBlock(Try aTry) {
+        Stream<Block> returnFinallyBlocks = concat(Stream.of(aTry.tryScope), aTry.catchScopes.stream()).flatMap(scope -> {
+            return IntStream.range(0, scope.blocks.size()).mapToObj(i -> {
+                Block block = scope.blocks.get(i);
+
+                Block nextBlock;
+
+                if (block == scope.last()) {
+                    if (!isStore(findPreviousInstruction(block.end))) { //ATHROW
+                        return null; // This one should end with exceptional finally block, so I ignore it.
+                    }
+
+                    /*
+                     * You can't just read the next catch or finally block, that would be too easy, right?
+                     * That's because 2 last finally blocks can be slapped together, for example, here:
+                     * try {
+                     *     if (foo()) return bar();
+                     * } finally {
+                     *     baz();
+                     * }
+                     * It means that the "last" finally block must be split manually.
+                     */
+                    //TODO Here we may have a false-positive detection of a "return" finally block.
+                    // How to avoid it: if default finally doesn't end with "return", we can derive that the
+                    // "load" and "return" at the end mean that the block is in fact a return block.
+                    // Checking the first "store" is DEFINITELY NOT ENOUGH.
+                    LabelNode theEndOfFinally = findTheEndOfFinally(block.end, false);
+
+                    nextBlock = new Block(this, theEndOfFinally, null);
+                } else {
+                    nextBlock = scope.blocks.get(i + 1);
+                }
+
+                return new Block(this, block.end, nextBlock.start);
+            });
+        }).filter(Objects::nonNull).filter(b -> b.startIndex() < b.endIndex());
+
+        returnFinallyBlocks.forEach(finallyBlock -> {
+            //TODO This code is bad. It doesn't cover nested stuff at all.
+            if (DEBUG) {
+                System.out.println("  Finally block in try " + finallyBlock);
+            }
+            AbstractInsnNode previousInstruction = findPreviousInstruction(finallyBlock.start);
+            //TODO Not the best way to find "return" finally blocks.
+            // May be false-positive if there's a simple assignment at the end.
+            // One way to avoid that would be checking the end of "finally" block for corresponding "load" instruction.
+            // But, it only works when the finally block itself doesn't have a return or throw at the end, that is
+            // the worst case scenario. There's no way to tell the difference then. I guess I just document it and that's it.
+            if (isStore(previousInstruction)) {
+                VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
+
+                replaceReturnedValueInstructions(storeInstruction, finallyBlock);
+            }
+        });
+
+        // No exceptions.
+        IntStream.range(0, aTry.catchScopes.size()).forEach(i -> {
+            Scope catchScope = aTry.catchScopes.get(i);
+
+            Block lastBlock = catchScope.last();
+
+            LabelNode startLabel = lastBlock.end;
+
+            LabelNode endLabel = i == aTry.catchScopes.size() - 1
+                    ? aTry.finallyScope.first().start
+                    : aTry.catchScopes.get(i + 1).first().start;
+
+            if (isStore(findPreviousInstruction(lastBlock.end))) {
+                LabelNode theEndOfFinally = findTheEndOfFinally(lastBlock.end, false);
+
+                if (theEndOfFinally == endLabel) {
+                    return;
+                } else {
+                    startLabel = theEndOfFinally;
+                }
+            }
+
+            AbstractInsnNode firstCatchInstruction = findNextInstruction(catchScope.first().start);
+
+            assert isStore(firstCatchInstruction);
+
+            var storeInstruction = (VarInsnNode) firstCatchInstruction;
+            Block finallyBlock = new Block(this, startLabel, endLabel);
+
+            replaceExceptionInstructions(storeInstruction, finallyBlock);
+        });
+
+        replaceExceptionInstructions((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start), aTry.finallyScope.first());
+
+        // Recursion!
+        Stream<Try> nestedInTry = aTry.tryScope.nested.stream();
+        Stream<Try> nestedInCatch = aTry.catchScopes.stream().map(scope -> scope.nested.stream()).flatMap(identity());
+        Stream<Try> nestedInFinally = aTry.finallyScope.nested.stream();
+
+        Stream.of(nestedInTry, nestedInCatch, nestedInFinally)
+                .flatMap(identity())
+                .forEach(this::replaceInstructionsInTryBlock);
     }
 
     /**
