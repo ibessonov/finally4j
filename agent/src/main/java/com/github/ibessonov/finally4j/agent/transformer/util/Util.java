@@ -16,9 +16,15 @@
 package com.github.ibessonov.finally4j.agent.transformer.util;
 
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.VarInsnNode;
+
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import static org.objectweb.asm.Opcodes.ALOAD;
 import static org.objectweb.asm.Opcodes.ASM7;
@@ -26,6 +32,7 @@ import static org.objectweb.asm.Opcodes.ASTORE;
 import static org.objectweb.asm.Opcodes.ATHROW;
 import static org.objectweb.asm.Opcodes.DLOAD;
 import static org.objectweb.asm.Opcodes.FLOAD;
+import static org.objectweb.asm.Opcodes.GOTO;
 import static org.objectweb.asm.Opcodes.ILOAD;
 import static org.objectweb.asm.Opcodes.INVOKESTATIC;
 import static org.objectweb.asm.Opcodes.INVOKEVIRTUAL;
@@ -176,5 +183,55 @@ public class Util {
         return new MethodInsnNode(INVOKEVIRTUAL,
                 boxedInternalName, primitiveName + "Value",
                 "()" + returnTypeDescriptor, false);
+    }
+
+    public static LabelNode findTheEndOfFinally(Map<LabelNode, Integer> labelIdx, LabelNode startLabel, boolean defaultBlock) {
+        AbstractInsnNode instruction = defaultBlock
+                ? findNextInstruction(startLabel)
+                : findPreviousInstruction(startLabel);
+
+        assert isStore(instruction);
+
+        var storeInstruction = (VarInsnNode) instruction;
+
+        Set<LabelNode> jumpLabels = new HashSet<>();
+
+        while (true) {
+            instruction = instruction.getNext();
+
+            if (instruction == null) {
+                // Should not happen I guess.
+                return null;
+            }
+
+            if (instruction instanceof LabelNode) {
+                jumpLabels.remove((LabelNode) instruction);
+
+                continue;
+            }
+
+            if (instruction instanceof JumpInsnNode && instruction.getOpcode() != GOTO) {
+                LabelNode label = ((JumpInsnNode) instruction).label;
+
+                jumpLabels.add(label);
+
+                if (DEBUG) {
+                    System.out.println("  Jump to " + labelIdx.get(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
+                }
+
+                continue;
+            }
+
+            if (isLoad(instruction) && ((VarInsnNode) instruction).var == storeInstruction.var) {
+                // Throw found.
+                return findNextLabel(instruction);
+            }
+
+            if (isReturn(instruction) || isThrow(instruction)) {
+                if (jumpLabels.isEmpty()) {
+                    return findPreviousLabel(instruction);
+                }
+            }
+        }
     }
 }

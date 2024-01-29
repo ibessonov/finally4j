@@ -18,47 +18,31 @@ package com.github.ibessonov.finally4j.agent.transformer;
 import com.github.ibessonov.finally4j.agent.transformer.code.Block;
 import com.github.ibessonov.finally4j.agent.transformer.code.Scope;
 import com.github.ibessonov.finally4j.agent.transformer.code.Try;
+import com.github.ibessonov.finally4j.agent.transformer.code.TryList;
 import com.github.ibessonov.finally4j.agent.transformer.util.Replacer;
 import com.github.ibessonov.finally4j.agent.transformer.util.Util;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import static com.github.ibessonov.finally4j.agent.transformer.code.Block.startsWith;
 import static com.github.ibessonov.finally4j.agent.transformer.util.Util.ASM_V;
 import static com.github.ibessonov.finally4j.agent.transformer.util.Util.DEBUG;
 import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findNextInstruction;
-import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findNextLabel;
 import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findPreviousInstruction;
-import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findPreviousLabel;
-import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isLoad;
-import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isReturn;
 import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isStore;
-import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isThrow;
-import static java.util.Comparator.comparingInt;
 import static java.util.function.Function.identity;
-import static java.util.stream.Collectors.groupingBy;
-import static java.util.stream.Collectors.mapping;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Stream.concat;
-import static org.objectweb.asm.Opcodes.GOTO;
 
 /**
  * @author ibessonov
@@ -98,7 +82,7 @@ public class FinallyMethodNode extends MethodNode {
                 .filter(node -> node.getType() == AbstractInsnNode.LABEL)
                 .forEach(node -> labelIdx.put((LabelNode) node, labelIdx.size()));
 
-        List<Try> tryList = initTryList();
+        List<Try> tryList = TryList.init(this);
 
         // Avoid logs and return if there are no finally blocks in the method.
         if (tryList.isEmpty()) {
@@ -108,21 +92,7 @@ public class FinallyMethodNode extends MethodNode {
         }
 
         if (DEBUG) {
-            System.out.println("  Transforming method '" + super.name + super.desc + "':");
-
-            for (TryCatchBlockNode node : tryCatchBlocks) {
-                System.out.println("    raw block: [s=" + labelIdx.get(node.start) + ", e=" + labelIdx.get(node.end) + ", h=" + labelIdx.get(node.handler) + ", t=" + node.type + "]");
-            }
-            System.out.println("   ---");
-
-            var invalidBlocks = tryCatchBlocks.stream()
-                    .filter(block -> !Util.validBlock(block)).map(block -> new Block(this, block).toString())
-                    .collect(toList());
-            if (!invalidBlocks.isEmpty()) {
-                System.out.println("    Invalid blocks: " + invalidBlocks);
-            }
-
-            tryList.forEach(aTry -> aTry.print("    "));
+            logTransformation(tryList);
         }
 
         for (Try aTry : tryList) {
@@ -135,6 +105,24 @@ public class FinallyMethodNode extends MethodNode {
         }
 
         super.accept(outerMv);
+    }
+
+    private void logTransformation(List<Try> tryList) {
+        System.out.println("  Transforming method '" + super.name + super.desc + "':");
+
+        for (TryCatchBlockNode node : tryCatchBlocks) {
+            System.out.println("    raw block: [s=" + labelIdx.get(node.start) + ", e=" + labelIdx.get(node.end) + ", h=" + labelIdx.get(node.handler) + ", t=" + node.type + "]");
+        }
+        System.out.println("   ---");
+
+        var invalidBlocks = tryCatchBlocks.stream()
+                .filter(block -> !Util.validBlock(block)).map(block -> new Block(this, block).toString())
+                .collect(toList());
+        if (!invalidBlocks.isEmpty()) {
+            System.out.println("    Invalid blocks: " + invalidBlocks);
+        }
+
+        tryList.forEach(aTry -> aTry.print("    "));
     }
 
     private void replaceInstructionsInTryBlock(Try aTry) {
@@ -163,7 +151,7 @@ public class FinallyMethodNode extends MethodNode {
                     // How to avoid it: if default finally doesn't end with "return", we can derive that the
                     // "load" and "return" at the end mean that the block is in fact a return block.
                     // Checking the first "store" is DEFINITELY NOT ENOUGH.
-                    LabelNode theEndOfFinally = findTheEndOfFinally(block.end, false);
+                    LabelNode theEndOfFinally = Util.findTheEndOfFinally(labelIdx, block.end, false);
 
                     nextBlock = new Block(this, theEndOfFinally, null);
                 } else {
@@ -205,7 +193,7 @@ public class FinallyMethodNode extends MethodNode {
                     : aTry.catchScopes.get(i + 1).first().start;
 
             if (isStore(findPreviousInstruction(lastBlock.end))) {
-                LabelNode theEndOfFinally = findTheEndOfFinally(lastBlock.end, false);
+                LabelNode theEndOfFinally = Util.findTheEndOfFinally(labelIdx, lastBlock.end, false);
 
                 if (theEndOfFinally == endLabel) {
                     return;
@@ -234,232 +222,5 @@ public class FinallyMethodNode extends MethodNode {
         Stream.of(nestedInTry, nestedInCatch, nestedInFinally)
                 .flatMap(identity())
                 .forEach(this::replaceInstructionsInTryBlock);
-    }
-
-    /**
-     * Splits "merged" default catch blocks apart. For example, in this case: <pre>
-     * try {
-     *     throw new Exception();
-     * } catch (Exception e) {
-     *     foo();
-     * } finally {
-     *     bar();
-     * }
-     * </pre>
-     * the block for {@code finally} handler would include both {@code try} and {@code catch} sections, but we want to
-     * process them separately.
-     */
-    private Stream<TryCatchBlockNode> splitTryCatchBlockNode(List<TryCatchBlockNode> mergedTryCatchBlocks, TryCatchBlockNode block) {
-        return mergedTryCatchBlocks.stream()
-                .filter(b -> b.start == block.start && labelIdx.get(b.end) < labelIdx.get(block.end))
-                //TODO I need a good comment about why there cannot be two blocks that satisfy the condition.
-                // Seems arbitrary, you know.
-                .findAny()
-                .map(b -> concat(
-                        Stream.of(new TryCatchBlockNode(block.start, b.end, block.handler, block.type)),
-                        //TODO Check if I need a recursion here. It depends on the exception variable index in catch
-                        // blocks that belong to the same try. It's probably the same for all of them, but who knows.
-                        Stream.of(new TryCatchBlockNode(b.end, block.end, block.handler, block.type))
-                )).orElse(
-                        Stream.of(block)
-                );
-    }
-
-    private List<Try> initTryList() {
-        // For some reason, there might be an intersection between start/end scope and the handler.
-        // Here I normalize such blocks by moving end to the handler position.
-        List<TryCatchBlockNode> tryCatchBlocks = this.tryCatchBlocks.stream()
-                .filter(Util::validBlock)
-                .map(b -> labelIdx.get(b.end) <= labelIdx.get(b.handler) ? b
-                        : new TryCatchBlockNode(b.start, b.handler, b.handler, b.type)
-                ).collect(toList());
-
-        // All "TryCatchBlockNode" instances that represent catch blocks, grouped by handler labels.
-        var blocksGroupedByHandler = tryCatchBlocks.stream()
-                .filter(Util::regularCatch)
-                .collect(groupingBy(block -> block.handler));
-
-        // List of all "TryCatchBlockNode" instances, for which the end label of the block matches the handler label.
-        var mergedTryCatchBlocks = tryCatchBlocks.stream()
-                .filter(Util::regularCatch)
-                .filter(b -> b.end == b.handler)
-                .collect(toList());
-
-        // All "TryCatchBlockNode" instances that represent finally blocks, grouped by handler labels.
-        var blocksGroupedByDefaultHandler = tryCatchBlocks.stream()
-                .filter(Util::defaultCatch)
-                .flatMap(block -> splitTryCatchBlockNode(mergedTryCatchBlocks, block))
-                .collect(groupingBy(block -> block.handler));
-
-        // Sort values in "blocksGroupedByHandler" and "blocksGroupedByDefaultHandler" to simplify matching them.
-        concat(blocksGroupedByHandler.values().stream(), blocksGroupedByDefaultHandler.values().stream())
-                .forEach(list -> list.sort(comparingInt(node -> labelIdx.get(node.start))));
-
-        // Maps "try" sections to lists of corresponding "catch" sections. Without finally blocks.
-        var catchBlocksMap = blocksGroupedByHandler.entrySet().stream().collect(
-                groupingBy(entry -> entry.getValue().stream().map(node -> new Block(this, node)).collect(toList()),
-                mapping(Entry::getKey, toList()))
-        );
-
-        List<Try> tempTryList = new ArrayList<>();
-
-        for (Entry<LabelNode, List<TryCatchBlockNode>> entry : blocksGroupedByDefaultHandler.entrySet()) {
-            List<TryCatchBlockNode> list = entry.getValue();
-
-            List<Block> blocks = list.stream().map(node -> new Block(this, node.start, node.end)).collect(toList());
-
-            LabelNode nextLabel = findTheEndOfFinally(entry.getKey(), true);
-
-            boolean found = false;
-
-            for (Entry<List<Block>, List<LabelNode>> catchBlocksMapEntry : catchBlocksMap.entrySet()) {
-                List<Block> prefix = catchBlocksMapEntry.getKey();
-
-                if (startsWith(blocks, prefix)) {
-                    List<LabelNode> value = catchBlocksMapEntry.getValue();
-                    value.sort(comparingInt(label -> labelIdx.get(label)));
-
-                    Try newTry = new Try();
-
-                    newTry.tryScope.blocks.addAll(blocks.subList(0, prefix.size()));
-
-                    List<Block> allCatchSegments = blocks.subList(prefix.size(), blocks.size());
-
-                    assert value.get(0) == allCatchSegments.get(0).start;
-                    Iterator<LabelNode> valueIterator = value.iterator();
-                    valueIterator.next();
-
-                    LabelNode nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
-                    Scope cur = new Scope();
-                    for (Block smallCatchSegment : allCatchSegments) {
-                        if (smallCatchSegment.start == nextCatch) {
-                            newTry.catchScopes.add(cur);
-
-                            nextCatch = valueIterator.hasNext() ? valueIterator.next() : null;
-                            cur = new Scope();
-                        }
-
-                        cur.blocks.add(smallCatchSegment);
-                    }
-                    newTry.catchScopes.add(cur);
-
-                    newTry.finallyScope.blocks.add(new Block(this, entry.getKey(), nextLabel));
-
-                    catchBlocksMap.remove(prefix);
-
-                    tempTryList.add(newTry);
-
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                Try newTry = new Try();
-
-                // No catch blocks.
-                newTry.tryScope.blocks.addAll(blocks);
-                newTry.finallyScope.blocks.add(new Block(this, entry.getKey(), nextLabel));
-
-                tempTryList.add(newTry);
-
-//                catchBlocksMap.put(blocks, List.of(finallyCatchBlockX));
-            }
-        }
-
-//        // catchBlocksMap now has all try-catch blocks without finally. They are irrelevant.
-//        // Or are they? What if there's a try-finally inside of catch block? That would be bad. Or would it?
-//        for (Map.Entry<List<Block>, List<LabelNode>> e : catchBlocksMap.entrySet()) {
-//            System.out.println("  Unaccounted try-catch: " + e.getKey() + " -> " + e.getValue().stream().map(c -> getLabelIndex(c.start)).collect(toList()));
-//            for (Block tryBlock : e.getKey()) {
-//                AbstractInsnNode nextInstruction = findNextInstruction(tryBlock.end);
-//                if (nextInstruction.getOpcode() == GOTO) {
-//                    System.out.println("  End label is most likely " + getLabelIndex(((JumpInsnNode) nextInstruction).label));
-//                }
-//            }
-//        }
-
-        tempTryList.sort(
-                comparingInt((Try t) -> t.finallyScope.first().endIndex() - t.tryScope.first().startIndex())
-                .thenComparingInt(t -> t.tryScope.first().startIndex())
-        );
-
-        return IntStream.range(0, tempTryList.size()).mapToObj(i -> {
-            Try first = tempTryList.get(i);
-
-            for (Try nextTry : tempTryList.subList(i + 1, tempTryList.size())) {
-                if (nextTry.tryScope.surrounds(first)) {
-                    nextTry.tryScope.nested.add(first);
-
-                    return Optional.<Try>empty();
-                }
-
-                for (Scope catchScope : nextTry.catchScopes) {
-                    if (catchScope.surrounds(first)) {
-                        catchScope.nested.add(first);
-
-                        return Optional.<Try>empty();
-                    }
-                }
-
-                if (nextTry.finallyScope.surrounds(first)) {
-                    nextTry.finallyScope.nested.add(first);
-
-                    return Optional.<Try>empty();
-                }
-            }
-
-            return Optional.of(first);
-        }).flatMap(Optional::stream).collect(toList());
-    }
-
-    private LabelNode findTheEndOfFinally(LabelNode startLabel, boolean defaultBlock) {
-        AbstractInsnNode instruction = defaultBlock
-                ? findNextInstruction(startLabel)
-                : findPreviousInstruction(startLabel);
-
-        assert isStore(instruction);
-
-        var storeInstruction = (VarInsnNode) instruction;
-
-        Set<LabelNode> jumpLabels = new HashSet<>();
-
-        while (true) {
-            instruction = instruction.getNext();
-
-            if (instruction == null) {
-                // Should not happen I guess.
-                return null;
-            }
-
-            if (instruction instanceof LabelNode) {
-                jumpLabels.remove((LabelNode) instruction);
-
-                continue;
-            }
-
-            if (instruction instanceof JumpInsnNode && instruction.getOpcode() != GOTO) {
-                LabelNode label = ((JumpInsnNode) instruction).label;
-
-                jumpLabels.add(label);
-
-                if (DEBUG) {
-                    System.out.println("  Jump to " + labelIdx.get(label) + ". Opcode = " + findNextInstruction(label).getOpcode());
-                }
-
-                continue;
-            }
-
-            if (isLoad(instruction) && ((VarInsnNode) instruction).var == storeInstruction.var) {
-                // Throw found.
-                return findNextLabel(instruction);
-            }
-
-            if (isReturn(instruction) || isThrow(instruction)) {
-                if (jumpLabels.isEmpty()) {
-                    return findPreviousLabel(instruction);
-                }
-            }
-        }
     }
 }
