@@ -15,16 +15,17 @@
  */
 package com.github.ibessonov.finally4j.agent.transformer;
 
+import com.github.ibessonov.finally4j.agent.transformer.code.Block;
+import com.github.ibessonov.finally4j.agent.transformer.code.Scope;
+import com.github.ibessonov.finally4j.agent.transformer.code.Try;
+import com.github.ibessonov.finally4j.agent.transformer.util.Replacer;
+import com.github.ibessonov.finally4j.agent.transformer.util.Util;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
-import org.objectweb.asm.tree.LdcInsnNode;
-import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
-import org.objectweb.asm.tree.TypeInsnNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.ArrayList;
@@ -40,41 +41,29 @@ import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import static com.github.ibessonov.finally4j.agent.transformer.Block.startsWith;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.ASM_V;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.DEBUG;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextInstruction;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.findNextLabel;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousInstruction;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.findPreviousLabel;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.isLoad;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.isReturn;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.isStore;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.isThrow;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.loadOpcode;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.toBoxedInternalName;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.toPrimitiveName;
+import static com.github.ibessonov.finally4j.agent.transformer.code.Block.startsWith;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.ASM_V;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.DEBUG;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findNextInstruction;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findNextLabel;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findPreviousInstruction;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.findPreviousLabel;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isLoad;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isReturn;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isStore;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.isThrow;
 import static java.util.Comparator.comparingInt;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.groupingBy;
 import static java.util.stream.Collectors.mapping;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Stream.concat;
-import static org.objectweb.asm.Opcodes.ATHROW;
-import static org.objectweb.asm.Opcodes.CHECKCAST;
-import static org.objectweb.asm.Opcodes.DUP;
 import static org.objectweb.asm.Opcodes.GOTO;
-import static org.objectweb.asm.Opcodes.ICONST_0;
-import static org.objectweb.asm.Opcodes.ICONST_1;
-import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
-import static org.objectweb.asm.Opcodes.INVOKESTATIC;
-import static org.objectweb.asm.Opcodes.NEW;
-import static org.objectweb.asm.tree.AbstractInsnNode.METHOD_INSN;
 
 /**
  * @author ibessonov
  */
-class FinallyMethodNode extends MethodNode {
+public class FinallyMethodNode extends MethodNode {
     /**
      * Closure that must be invoked when the method is transformed by this class. Used to notify external class visitor.
      */
@@ -88,13 +77,18 @@ class FinallyMethodNode extends MethodNode {
     /**
      * Mapping of all labels into their sequence number.
      */
-    final Map<LabelNode, Integer> labelIdx = new IdentityHashMap<>();
+    public final Map<LabelNode, Integer> labelIdx = new IdentityHashMap<>();
+
+
+    private final Replacer replacer;
 
     FinallyMethodNode(MethodVisitor outerMv, Runnable methodTransformedClosure,
                       int access, String name, String desc, String signature, String[] exceptions) {
         super(ASM_V, access, name, desc, signature, exceptions);
         this.outerMv = outerMv;
         this.methodTransformedClosure = methodTransformedClosure;
+
+        this.replacer = new Replacer(instructions, methodTransformedClosure, desc.charAt(desc.length() - 1));
     }
 
     @Override
@@ -194,7 +188,7 @@ class FinallyMethodNode extends MethodNode {
             if (isStore(previousInstruction)) {
                 VarInsnNode storeInstruction = (VarInsnNode) previousInstruction;
 
-                replaceReturnedValueInstructions(storeInstruction, finallyBlock);
+                replacer.replaceReturnedValueInstructions(storeInstruction, finallyBlock);
             }
         });
 
@@ -227,10 +221,10 @@ class FinallyMethodNode extends MethodNode {
             var storeInstruction = (VarInsnNode) firstCatchInstruction;
             Block finallyBlock = new Block(this, startLabel, endLabel);
 
-            replaceExceptionInstructions(storeInstruction, finallyBlock);
+            replacer.replaceExceptionInstructions(storeInstruction, finallyBlock);
         });
 
-        replaceExceptionInstructions((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start), aTry.finallyScope.first());
+        replacer.replaceExceptionInstructions((VarInsnNode) findNextInstruction(aTry.finallyScope.first().start), aTry.finallyScope.first());
 
         // Recursion!
         Stream<Try> nestedInTry = aTry.tryScope.nested.stream();
@@ -467,135 +461,5 @@ class FinallyMethodNode extends MethodNode {
                 }
             }
         }
-    }
-
-    private void replaceReturnedValueInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
-        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
-            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
-                assert node instanceof MethodInsnNode;
-
-                MethodInsnNode methodInstruction = (MethodInsnNode) node;
-                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
-                    switch (methodInstruction.name) {
-                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
-                            break;
-
-                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
-                            break;
-
-                        default:
-                            node = replaceReturnedValueInstruction(methodInstruction, storeInstruction.var);
-                    }
-                }
-            }
-        }
-    }
-
-    private void replaceExceptionInstructions(VarInsnNode storeInstruction, Block finallyBlock) {
-        for (AbstractInsnNode node = finallyBlock.start; node != finallyBlock.end; node = node.getNext()) {
-            if (node.getType() == METHOD_INSN && node.getOpcode() == INVOKESTATIC) {
-                assert node instanceof MethodInsnNode;
-
-                MethodInsnNode methodInstruction = (MethodInsnNode) node;
-                if (methodInstruction.owner.equals(Constants.FINALLY_CLASS_INTERNAL_NAME)) {
-                    switch (methodInstruction.name) {
-                        case Constants.FINALLY_HAS_RETURNED_VALUE_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_0));
-                            break;
-
-                        case Constants.FINALLY_HAS_THROWN_EXCEPTION_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new InsnNode(ICONST_1));
-                            break;
-
-                        case Constants.FINALLY_GET_THROWN_EXCEPTION_OPTIONAL_METHOD_NAME:
-                            super.instructions.insert(node, Util.optionalOfNullable());
-
-                            //noinspection fallthrough
-                        case Constants.FINALLY_GET_THROWN_EXCEPTION_METHOD_NAME:
-                            node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(';'), storeInstruction.var));
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Replaces the {@code Finally.returnedValue*()} call with the actual returned value.
-     *
-     * @param methodInstruction Invoke instruction node.
-     * @param var Variable index of the return value.
-     * @return New instruction node that replaced the invoke instruction, or the original instruction if nothing happened.
-     */
-    private AbstractInsnNode replaceReturnedValueInstruction(MethodInsnNode methodInstruction, int var) {
-        if (!methodInstruction.name.startsWith(Constants.FINALLY_GET_RETURNED_VALUE_METHOD_PREFIX)) {
-            return methodInstruction;
-        }
-
-        char returnType = super.desc.charAt(super.desc.length() - 1);
-        assert returnType != 'V' : "Returning of void passed somehow";
-
-        // Replace INVOKE* with *LOAD.
-        AbstractInsnNode node = replaceInstruction(methodInstruction, new VarInsnNode(loadOpcode(returnType), var));
-
-        if (returnType == ';') { // Method returns "Object", essentially.
-            switch (methodInstruction.name) {
-                case Constants.FINALLY_GET_RETURNED_VALUE_OPTIONAL_METHOD_NAME:
-                    // Wrap the head of the stack into a "Optional.ofNullable".
-                    super.instructions.insert(node, Util.optionalOfNullable());
-
-                //noinspection fallthrough
-                case Constants.FINALLY_GET_RETURNED_VALUE_METHOD_NAME:
-                    break;
-
-                default:
-                    char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
-                    String boxedInternalName = toBoxedInternalName(currentType);
-
-                    // Insert instructions in reverse order.
-                    // In reality the CHECKCAST is first, and INVOKEVIRTUAL is second.
-                    super.instructions.insert(node, Util.primitiveValue(currentType));
-                    super.instructions.insert(node, new TypeInsnNode(CHECKCAST, boxedInternalName));
-            }
-        } else { // Method returns primitive type.
-            switch (methodInstruction.name) {
-                case Constants.FINALLY_GET_RETURNED_VALUE_OPTIONAL_METHOD_NAME:
-                    // Insert instructions in reverse order. "Optional.of" goes last.
-                    super.instructions.insert(node, Util.optionalOf());
-
-                //noinspection fallthrough
-                case Constants.FINALLY_GET_RETURNED_VALUE_METHOD_NAME:
-                    super.instructions.insert(node, Util.valueOf(returnType));
-                    break;
-
-                default:
-                    char currentType = methodInstruction.desc.charAt(methodInstruction.desc.length() - 1);
-                    if (currentType != returnType) {
-                        // Old method invocation left untouched to preserve bytecode consistency, just in case.
-                        node = replaceInstruction(node, methodInstruction);
-
-                        String message = toPrimitiveName(currentType) + " cannot be cast to " + toPrimitiveName(returnType);
-
-                        // Bytecode for "throw new ClassCastException(message);".
-                        super.instructions.insertBefore(node, new TypeInsnNode(NEW, "java/lang/ClassCastException"));
-                        super.instructions.insertBefore(node, new InsnNode(DUP));
-                        super.instructions.insertBefore(node, new LdcInsnNode(message));
-                        super.instructions.insertBefore(node, new MethodInsnNode(INVOKESPECIAL, "java/lang/ClassCastException", "<init>", "(Ljava/lang/String;)V", false));
-                        super.instructions.insertBefore(node, new InsnNode(ATHROW));
-                    }
-            }
-        }
-
-        return node;
-    }
-
-    private AbstractInsnNode replaceInstruction(AbstractInsnNode from, AbstractInsnNode to) {
-        super.instructions.insertBefore(from, to);
-        super.instructions.remove(from);
-
-        methodTransformedClosure.run();
-
-        return to;
     }
 }

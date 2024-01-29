@@ -1,5 +1,6 @@
 package com.github.ibessonov.finally4j.agent.transformer;
 
+import com.github.ibessonov.finally4j.agent.transformer.util.Constants;
 import org.objectweb.asm.ClassReader;
 
 /**

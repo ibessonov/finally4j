@@ -15,6 +15,7 @@
  */
 package com.github.ibessonov.finally4j.agent.transformer;
 
+import com.github.ibessonov.finally4j.agent.transformer.util.Constants;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -23,8 +24,8 @@ import org.objectweb.asm.MethodVisitor;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
-import static com.github.ibessonov.finally4j.agent.transformer.Util.ASM_V;
-import static com.github.ibessonov.finally4j.agent.transformer.Util.DEBUG;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.ASM_V;
+import static com.github.ibessonov.finally4j.agent.transformer.util.Util.DEBUG;
 import static org.objectweb.asm.ClassWriter.COMPUTE_FRAMES;
 import static org.objectweb.asm.ClassWriter.COMPUTE_MAXS;
 import static org.objectweb.asm.Opcodes.ICONST_0;

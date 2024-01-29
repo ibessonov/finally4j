@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.ibessonov.finally4j.agent.transformer;
+package com.github.ibessonov.finally4j.agent.transformer.util;
 
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.LabelNode;
@@ -38,68 +38,73 @@ import static org.objectweb.asm.tree.AbstractInsnNode.LABEL;
 /**
  * @author ibessonov
  */
-class Util {
-    static final boolean DEBUG = "true".equals(System.getProperty("finally4j.debug"));
+public class Util {
+    public static final boolean DEBUG = "true".equals(System.getProperty("finally4j.debug"));
 
-    static int ASM_V = ASM7;
+    public static int ASM_V = ASM7;
 
-    static AbstractInsnNode findPreviousInstruction(AbstractInsnNode node) {
+    public static AbstractInsnNode findPreviousInstruction(AbstractInsnNode node) {
         do {
             node = node.getPrevious();
         } while (node.getOpcode() == -1);
         return node;
     }
 
-    static AbstractInsnNode findNextInstruction(AbstractInsnNode node) {
+    public static AbstractInsnNode findNextInstruction(AbstractInsnNode node) {
         do {
             node = node.getNext();
         } while (node != null && node.getOpcode() == -1);
         return node;
     }
 
-    static LabelNode findPreviousLabel(AbstractInsnNode node) {
+    public static LabelNode findPreviousLabel(AbstractInsnNode node) {
         do {
             node = node.getPrevious();
         } while (node != null && node.getType() != LABEL);
         return (LabelNode) node;
     }
 
-    static LabelNode findNextLabel(AbstractInsnNode node) {
+    public static LabelNode findNextLabel(AbstractInsnNode node) {
         do {
             node = node.getNext();
         } while (node != null && node.getType() != LABEL);
         return (LabelNode) node;
     }
 
-    static boolean isStore(AbstractInsnNode node) {
+    public static boolean isStore(AbstractInsnNode node) {
         int opcode = node.getOpcode();
         return ISTORE <= opcode && opcode <= ASTORE;
     }
 
-    static boolean isLoad(AbstractInsnNode node) {
+    public static boolean isLoad(AbstractInsnNode node) {
         int opcode = node.getOpcode();
         return ILOAD <= opcode && opcode <= ALOAD;
     }
 
-    static boolean isReturn(AbstractInsnNode instruction) {
+    public static boolean isReturn(AbstractInsnNode instruction) {
         int opcode = instruction.getOpcode();
         return IRETURN <= opcode && opcode <= RETURN;
     }
 
-    static boolean isThrow(AbstractInsnNode instruction) {
+    public static boolean isThrow(AbstractInsnNode instruction) {
         int opcode = instruction.getOpcode();
         return opcode == ATHROW;
     }
 
-    static boolean regularCatch(TryCatchBlockNode block) {
+    public static boolean regularCatch(TryCatchBlockNode block) {
         return block.type != null;
     }
 
-    static boolean defaultCatch(TryCatchBlockNode block) {
+    public static boolean defaultCatch(TryCatchBlockNode block) {
         return block.type == null;
     }
 
-    static String toBoxedInternalName(char type) {
+    public static boolean validBlock(TryCatchBlockNode block) {
+        // Nasty bug in compiler?
+        return block.start != block.handler;
+    }
+
+    public static String toBoxedInternalName(char type) {
         switch (type) {
             case 'Z': return "java/lang/Boolean";
             case 'B': return "java/lang/Byte";
@@ -113,7 +118,7 @@ class Util {
         }
     }
 
-    static int loadOpcode(char type) {
+    public static int loadOpcode(char type) {
         switch (type) {
             case 'Z':
             case 'B':
@@ -127,7 +132,7 @@ class Util {
         }
     }
 
-    static String toPrimitiveName(char type) {
+    public static String toPrimitiveName(char type) {
         switch (type) {
             case 'Z': return "boolean";
             case 'B': return "byte";
@@ -141,7 +146,7 @@ class Util {
         }
     }
 
-    static String getMethodDescriptorForValueOf(char type) {
+    public static String getMethodDescriptorForValueOf(char type) {
         return "(" + type + ")L" + toBoxedInternalName(type) + ";";
     }
 
@@ -149,32 +154,27 @@ class Util {
         return new IllegalArgumentException(Character.toString(type));
     }
 
-    static MethodInsnNode optionalOfNullable() {
+    public static MethodInsnNode optionalOfNullable() {
         return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
                 "ofNullable", "(Ljava/lang/Object;)Ljava/util/Optional;", false);
     }
 
-    static MethodInsnNode optionalOf() {
+    public static MethodInsnNode optionalOf() {
         return new MethodInsnNode(INVOKESTATIC, "java/util/Optional",
                 "of", "(Ljava/lang/Object;)Ljava/util/Optional;",false);
     }
 
-    static MethodInsnNode valueOf(char returnTypeDescriptor) {
+    public static MethodInsnNode valueOf(char returnTypeDescriptor) {
         return new MethodInsnNode(INVOKESTATIC, toBoxedInternalName(returnTypeDescriptor),
                 "valueOf", getMethodDescriptorForValueOf(returnTypeDescriptor),false);
     }
 
-    static MethodInsnNode primitiveValue(char returnTypeDescriptor) {
+    public static MethodInsnNode primitiveValue(char returnTypeDescriptor) {
         String primitiveName = toPrimitiveName(returnTypeDescriptor);
         String boxedInternalName = toBoxedInternalName(returnTypeDescriptor);
 
         return new MethodInsnNode(INVOKEVIRTUAL,
                 boxedInternalName, primitiveName + "Value",
                 "()" + returnTypeDescriptor, false);
-    }
-
-    static boolean validBlock(TryCatchBlockNode block) {
-        // Nasty bug in compiler?
-        return block.start != block.handler;
     }
 }

@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.ibessonov.finally4j.agent.transformer;
+package com.github.ibessonov.finally4j.agent.transformer.util;
 
-interface Constants {
+public interface Constants {
     String FINALLY_CLASS_INTERNAL_NAME = "com/github/ibessonov/finally4j/Finally";
 
     String FINALLY_IS_SUPPORTED_METHOD_NAME = "isSupported";

@@ -1,5 +1,6 @@
-package com.github.ibessonov.finally4j.agent.transformer;
+package com.github.ibessonov.finally4j.agent.transformer.code;
 
+import com.github.ibessonov.finally4j.agent.transformer.FinallyMethodNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.TryCatchBlockNode;
 
@@ -11,8 +12,8 @@ import java.util.Objects;
  *
  * @author ibessonov
  */
-final class Block {
-    static boolean startsWith(List<Block> blocks, List<Block> prefix) {
+public final class Block {
+    public static boolean startsWith(List<Block> blocks, List<Block> prefix) {
         if (blocks.size() < prefix.size()) {
             return false;
         }
@@ -26,28 +27,28 @@ final class Block {
     /**
      * Start label, inclusive, non-null.
      */
-    final LabelNode start;
+    public final LabelNode start;
 
     /**
      * End label, exclusive, nullable.
      */
-    final LabelNode end;
+    public final LabelNode end;
 
-    Block(FinallyMethodNode methodNode, LabelNode start, LabelNode end) {
+    public Block(FinallyMethodNode methodNode, LabelNode start, LabelNode end) {
         this.methodNode = methodNode;
         this.start = start;
         this.end = end;
     }
 
-    Block(FinallyMethodNode methodNode, TryCatchBlockNode node) {
+    public Block(FinallyMethodNode methodNode, TryCatchBlockNode node) {
         this(methodNode, node.start, node.end);
     }
 
-    int startIndex() {
+    public int startIndex() {
         return methodNode.labelIdx.get(start);
     }
 
-    int endIndex() {
+    public int endIndex() {
         return methodNode.labelIdx.get(end);
     }
 
